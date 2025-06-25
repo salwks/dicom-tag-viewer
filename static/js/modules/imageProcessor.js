@@ -511,6 +511,6 @@ class ImageProcessor {
 export const imageProcessor = new ImageProcessor();
 
 // 개발 모드에서 전역 객체에 추가
-if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
+if (typeof window !== "undefined" && window.ENV?.NODE_ENV === "development") {
   window.imageProcessor = imageProcessor;
 }

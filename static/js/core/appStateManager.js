@@ -429,6 +429,6 @@ class AppStateManager {
 export const appState = new AppStateManager();
 
 // 개발 모드에서 디버깅을 위해 전역 객체에 추가
-if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
+if (typeof window !== "undefined" && window.ENV?.NODE_ENV === "development") {
   window.appState = appState;
 }

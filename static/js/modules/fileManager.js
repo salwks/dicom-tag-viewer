@@ -3,9 +3,9 @@
  * 파일 업로드, 검증, 처리를 담당
  */
 
-import { appState } from "/static/js/core/appStateManager.js";
-import { errorHandler } from "/static/js/core/errorHandler.js";
-import { dicomApi } from "/static/js/services/apiService.js";
+import { appState } from "../core/appStateManager.js";
+import { errorHandler } from "../core/errorHandler.js";
+import { dicomApi } from "../services/apiService.js";
 
 class FileManager {
   constructor() {
@@ -397,6 +397,6 @@ class FileManager {
 export const fileManager = new FileManager();
 
 // 개발 모드에서 전역 객체에 추가
-if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
+if (typeof window !== "undefined" && window.ENV?.NODE_ENV === "development") {
   window.fileManager = fileManager;
 }

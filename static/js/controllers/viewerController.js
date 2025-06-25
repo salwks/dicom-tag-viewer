@@ -6,7 +6,7 @@
 import { errorHandler } from "../core/errorHandler.js";
 import { measurementEngine } from "../modules/measurementEngine.js";
 import { imageProcessor } from "../modules/imageProcessor.js";
-import { dicomApi } from "../services/apiService.js";
+import { dicomApi } from "../services/apiService.js";
 import { appState } from "../core/appStateManager.js";
 
 export class ViewerController {

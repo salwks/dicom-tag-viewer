@@ -3,7 +3,7 @@
  * 모든 서버 통신을 담당하고 에러 처리, 재시도 로직을 포함
  */
 
-import { errorHandler } from "../core/errorHandler";
+import { errorHandler } from "../core/errorHandler.js";
 
 class ApiService {
   constructor() {
@@ -333,9 +333,21 @@ class DicomApiService extends ApiService {
    */
   async generatePreview(file) {
     try {
-      const blob = await this.uploadFile("/preview", file, {
+      const response = await fetch(this.baseURL + "/preview", {
+        method: "POST",
+        body: (() => {
+          const formData = new FormData();
+          formData.append("file", file);
+          return formData;
+        })(),
         timeout: 60000, // 1분
       });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const blob = await response.blob();
 
       return {
         success: true,
@@ -423,7 +435,7 @@ export const apiService = new ApiService();
 export const dicomApi = new DicomApiService();
 
 // 개발 모드에서 전역 객체에 추가
-if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
+if (typeof window !== "undefined" && window.ENV?.NODE_ENV === "development") {
   window.apiService = apiService;
   window.dicomApi = dicomApi;
 }

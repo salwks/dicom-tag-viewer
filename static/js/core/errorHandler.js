@@ -430,7 +430,7 @@ class ErrorHandler {
     console.error("[ErrorHandler]", logEntry);
 
     // 개발 모드가 아닌 경우 서버로 에러 로그 전송
-    if (process.env.NODE_ENV === "production") {
+    if (window.ENV?.NODE_ENV === "production") {
       this.sendErrorToServer(logEntry);
     }
   }
@@ -477,6 +477,6 @@ class ErrorHandler {
 export const errorHandler = new ErrorHandler();
 
 // 전역 객체에 추가 (개발 모드)
-if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
+if (typeof window !== "undefined" && window.ENV?.NODE_ENV === "development") {
   window.errorHandler = errorHandler;
 }

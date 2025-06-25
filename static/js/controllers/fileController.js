@@ -6,7 +6,7 @@
 import { appState } from "../core/appStateManager.js";
 import { errorHandler } from "../core/errorHandler.js";
 import { fileManager } from "../modules/fileManager.js";
-import { dicomApi } from "../services/apiService.js";
+import { dicomApi } from "../services/apiService.js";
 
 export class FileController {
   constructor() {
@@ -227,7 +227,7 @@ export class FileController {
     try {
       const previewResult = await dicomApi.generatePreview(this.currentFile);
 
-      if (previewResult.success) {
+      if (previewResult.success && previewResult.imageBlob instanceof Blob) {
         // Blob URL 생성
         const imageUrl = URL.createObjectURL(previewResult.imageBlob);
 
@@ -240,6 +240,8 @@ export class FileController {
         // 상태 업데이트
         appState.setState("previewImageUrl", imageUrl);
         appState.emit("preview-generated", { imageUrl });
+      } else {
+        throw new Error("미리보기 이미지 생성에 실패했습니다.");
       }
     } catch (error) {
       // 미리보기 생성 실패는 치명적이지 않음

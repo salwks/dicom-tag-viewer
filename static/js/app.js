@@ -3,12 +3,12 @@
  * 전체 애플리케이션의 초기화와 라우팅을 담당
  */
 
-// 핵심 모듈 import
+// 핵심 모듈 import - 경로 수정
 import { appState } from "./core/appStateManager.js";
-import { errorHandler } from "../core/errorHandler.js";
-import { fileManager } from "../modules/fileManager.js";
-import { measurementEngine } from "../modules/measurementEngine.js";
-import { imageProcessor } from "../modules/imageProcessor.js";
+import { errorHandler } from "./core/errorHandler.js";
+import { fileManager } from "./modules/fileManager.js";
+import { measurementEngine } from "./modules/measurementEngine.js";
+import { imageProcessor } from "./modules/imageProcessor.js";
 
 // 컨트롤러 import
 import { UIController } from "./controllers/uiController.js";
