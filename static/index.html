@@ -1,182 +1,583 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DICOM 분석기</title>
+    <title>DICOM 분석기 - 의료영상 뷰어</title>
+
+    <!-- Meta Tags -->
+    <meta
+      name="description"
+      content="전문적인 DICOM 의료영상 분석 및 측정 도구"
+    />
+    <meta name="keywords" content="DICOM, 의료영상, 측정, 분석, 뷰어" />
+
+    <!-- Stylesheets -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://d3js.org/d3.v6.min.js"></script>
-    <link rel="stylesheet" href="./css/custom.css" />
+
+    <!-- Custom Styles -->
     <style>
-      /* 테이블 스타일 개선 */
-      #tagTable {
-        table-layout: fixed;
-        width: 100%;
+      /* 커스텀 스타일 */
+      .drag-over {
+        background-color: rgba(59, 130, 246, 0.1);
+        border: 2px dashed #3b82f6;
       }
 
-      #tagTable th:nth-child(1) {
-        width: 120px;
-      } /* Tag ID */
-      #tagTable th:nth-child(2) {
-        width: 250px;
-      } /* Description */
-      #tagTable th:nth-child(3) {
-        width: 60px;
-      } /* VR */
-      #tagTable th:nth-child(4) {
-        width: 60px;
-      } /* VM */
-      #tagTable th:nth-child(5) {
-        width: 80px;
-      } /* Length */
-      #tagTable th:nth-child(6) {
-        width: auto;
-      } /* Value - 나머지 공간 */
-
-      /* Value 셀 스타일 */
-      .value-cell {
-        min-width: 0; /* flex-shrink 허용 */
-      }
-
-      .value-container {
-        width: 100%;
-        min-width: 0; /* flex-shrink 허용 */
-      }
-
-      .value-text {
-        white-space: nowrap;
-        overflow: hidden;
-        min-width: 0; /* flex-shrink 허용 */
-      }
-
-      /* 토스트 메시지 스타일 */
-      .toast-message {
-        min-width: 250px;
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-      }
-
-      /* 이미지 뷰어 스타일 */
-      #imageViewer {
-        background-color: #f8f9fa;
-        position: relative;
-      }
-
-      #dicomImage {
-        object-fit: contain;
-      }
-
-      /* 로딩 스피너 스타일 */
       .loading-spinner {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
+        animation: spin 1s linear infinite;
       }
 
-      /* 테이블 반응형 */
-      @media (max-width: 768px) {
-        #tagTable th:nth-child(2) {
-          width: 200px;
+      @keyframes spin {
+        from {
+          transform: rotate(0deg);
         }
-        #tagTable th:nth-child(3),
-        #tagTable th:nth-child(4),
-        #tagTable th:nth-child(5) {
-          width: 50px;
+        to {
+          transform: rotate(360deg);
         }
+      }
+
+      .measurement-overlay {
+        pointer-events: none;
+      }
+
+      .viewer-container {
+        position: relative;
+        overflow: hidden;
+      }
+
+      .zoom-indicator {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+      }
+
+      .error-modal {
+        animation: slideIn 0.3s ease-out;
+      }
+
+      @keyframes slideIn {
+        from {
+          transform: translateX(100%);
+        }
+        to {
+          transform: translateX(0);
+        }
+      }
+
+      /* 드래그 앤 드롭 영역 */
+      .drop-zone {
+        transition: all 0.3s ease;
+      }
+
+      .drop-zone.drag-active {
+        transform: scale(1.02);
+        box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+      }
+
+      /* 측정 도구 버튼 활성화 상태 */
+      .tool-active {
+        background-color: #1d4ed8 !important;
+        box-shadow: 0 0 0 2px #93c5fd;
+      }
+
+      /* 프로그레스 바 */
+      .progress-bar {
+        transition: width 0.3s ease;
+      }
+
+      /* 툴팁 */
+      .tooltip {
+        position: absolute;
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        pointer-events: none;
+        z-index: 1000;
       }
     </style>
   </head>
-  <body class="bg-gray-100">
-    <div
-      id="menuBar"
-      class="flex justify-between items-center p-4 bg-white shadow fixed top-0 left-0 right-0 z-10"
-    >
-      <div class="flex items-center space-x-2">
-        <input type="file" id="dicomFile" accept=".dcm,.dicom" class="hidden" />
-        <button
-          id="btnSelect"
-          class="bg-blue-500 text-white py-2 px-4 rounded hover:bg-blue-600 transition-colors"
-        >
-          DICOM 파일 선택
-        </button>
-        <button
-          id="btnUpload"
-          class="bg-blue-500 text-white py-2 px-4 rounded hover:bg-blue-600 transition-colors opacity-50 cursor-not-allowed"
-          disabled
-        >
-          업로드
-        </button>
-        <span
-          id="selectedFileName"
-          class="text-gray-700 ml-4 max-w-md truncate"
-        ></span>
+
+  <body class="bg-gray-50 font-sans">
+    <!-- 메인 컨테이너 -->
+    <div id="app" class="min-h-screen">
+      <!-- 헤더 -->
+      <header
+        id="header"
+        class="bg-white shadow-sm border-b border-gray-200 fixed top-0 left-0 right-0 z-50"
+      >
+        <div class="flex justify-between items-center p-4">
+          <!-- 왼쪽: 파일 관리 -->
+          <div class="flex items-center space-x-4">
+            <h1 class="text-xl font-bold text-gray-800">DICOM 분석기</h1>
+
+            <div class="flex items-center space-x-2">
+              <input
+                type="file"
+                id="fileInput"
+                accept=".dcm,.dicom,.dic"
+                class="hidden"
+              />
+              <button
+                id="btnSelectFile"
+                class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition-colors"
+              >
+                파일 선택
+              </button>
+              <button
+                id="btnUpload"
+                class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition-colors opacity-50 cursor-not-allowed"
+                disabled
+              >
+                분석 시작
+              </button>
+            </div>
+
+            <!-- 파일 정보 -->
+            <div id="fileInfo" class="text-sm text-gray-600 hidden">
+              <span id="fileName" class="font-medium"></span>
+              <span id="fileSize" class="text-gray-500"></span>
+            </div>
+
+            <!-- 로딩 인디케이터 -->
+            <div
+              id="loadingIndicator"
+              class="hidden flex items-center space-x-2"
+            >
+              <div
+                class="loading-spinner w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full"
+              ></div>
+              <span class="text-sm text-gray-600">처리 중...</span>
+            </div>
+          </div>
+
+          <!-- 오른쪽: 뷰 선택 -->
+          <div class="flex space-x-2">
+            <button
+              id="btnChartView"
+              class="view-tab bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600 transition-colors opacity-50 cursor-not-allowed"
+              disabled
+            >
+              구조 보기
+            </button>
+            <button
+              id="btnTableView"
+              class="view-tab bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600 transition-colors opacity-50 cursor-not-allowed"
+              disabled
+            >
+              태그 정보
+            </button>
+            <button
+              id="btnViewerView"
+              class="view-tab bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600 transition-colors opacity-50 cursor-not-allowed"
+              disabled
+            >
+              영상 뷰어
+            </button>
+          </div>
+        </div>
+
+        <!-- 프로그레스 바 -->
+        <div id="progressContainer" class="hidden">
+          <div class="w-full bg-gray-200 h-1">
+            <div
+              id="progressBar"
+              class="progress-bar bg-blue-500 h-1"
+              style="width: 0%"
+            ></div>
+          </div>
+        </div>
+      </header>
+
+      <!-- 메인 콘텐츠 -->
+      <main class="pt-20 min-h-screen">
+        <!-- 드래그 앤 드롭 영역 (초기 상태) -->
         <div
-          id="loader"
-          class="hidden ml-2 border-t-2 border-blue-500 rounded-full w-6 h-6 animate-spin"
-        ></div>
-      </div>
-      <div class="flex space-x-2">
-        <button
-          id="btnChart"
-          class="bg-green-500 text-white py-2 px-4 rounded hover:bg-green-600 transition-colors opacity-50 cursor-not-allowed"
-          disabled
+          id="dropZone"
+          class="drop-zone hidden fixed inset-0 bg-gray-100 flex items-center justify-center"
         >
-          구조 보기
-        </button>
-        <button
-          id="btnTable"
-          class="bg-green-500 text-white py-2 px-4 rounded hover:bg-green-600 transition-colors opacity-50 cursor-not-allowed"
-          disabled
+          <div
+            class="text-center p-8 border-2 border-dashed border-gray-300 rounded-lg bg-white"
+          >
+            <div class="text-6xl mb-4">📁</div>
+            <h2 class="text-2xl font-bold text-gray-700 mb-2">
+              DICOM 파일을 드래그하여 업로드
+            </h2>
+            <p class="text-gray-500 mb-4">또는 "파일 선택" 버튼을 클릭하세요</p>
+            <div class="text-sm text-gray-400">
+              지원 형식: .dcm, .dicom, .dic (최대 100MB)
+            </div>
+          </div>
+        </div>
+
+        <!-- 초기 화면 -->
+        <div
+          id="welcomeScreen"
+          class="flex items-center justify-center min-h-screen"
         >
-          DICOM 태그
-        </button>
-        <button
-          id="btnViewer"
-          class="bg-green-500 text-white py-2 px-4 rounded hover:bg-green-600 transition-colors opacity-50 cursor-not-allowed"
-          disabled
+          <div class="text-center p-8">
+            <div class="text-8xl mb-6">🏥</div>
+            <h1 class="text-4xl font-bold text-gray-800 mb-4">DICOM 분석기</h1>
+            <p class="text-xl text-gray-600 mb-8">
+              의료영상 파일을 분석하고 측정하세요
+            </p>
+
+            <div class="space-y-4 max-w-md mx-auto">
+              <button
+                id="btnSelectFileWelcome"
+                class="w-full bg-blue-500 text-white py-3 px-6 rounded-lg text-lg hover:bg-blue-600 transition-colors"
+              >
+                파일 선택하기
+              </button>
+              <div class="text-sm text-gray-500">
+                DICOM 파일(.dcm, .dicom, .dic)을 지원합니다
+              </div>
+            </div>
+
+            <!-- 기능 소개 -->
+            <div
+              class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-12 max-w-4xl mx-auto"
+            >
+              <div class="text-center p-6 bg-white rounded-lg shadow-sm">
+                <div class="text-3xl mb-2">📊</div>
+                <h3 class="font-bold text-gray-800 mb-2">구조 분석</h3>
+                <p class="text-gray-600 text-sm">
+                  DICOM 메타데이터를 시각적으로 탐색
+                </p>
+              </div>
+              <div class="text-center p-6 bg-white rounded-lg shadow-sm">
+                <div class="text-3xl mb-2">📏</div>
+                <h3 class="font-bold text-gray-800 mb-2">정밀 측정</h3>
+                <p class="text-gray-600 text-sm">
+                  거리, 각도, 면적을 정확하게 측정
+                </p>
+              </div>
+              <div class="text-center p-6 bg-white rounded-lg shadow-sm">
+                <div class="text-3xl mb-2">🖼️</div>
+                <h3 class="font-bold text-gray-800 mb-2">영상 처리</h3>
+                <p class="text-gray-600 text-sm">
+                  밝기, 대비, 줌 등 다양한 조작
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 차트 뷰 -->
+        <div id="chartView" class="hidden w-full h-screen bg-white">
+          <div class="p-4">
+            <h2 class="text-2xl font-bold text-gray-800 mb-4">
+              DICOM 구조 분석
+            </h2>
+            <div
+              id="chartContainer"
+              class="w-full h-full border border-gray-200 rounded-lg"
+            ></div>
+          </div>
+        </div>
+
+        <!-- 테이블 뷰 -->
+        <div
+          id="tableView"
+          class="hidden w-full h-screen bg-white overflow-auto"
         >
-          영상 보기
-        </button>
+          <div class="p-4">
+            <div class="flex justify-between items-center mb-4">
+              <h2 class="text-2xl font-bold text-gray-800">DICOM 태그 정보</h2>
+              <div class="flex space-x-2">
+                <input
+                  type="text"
+                  id="tagSearch"
+                  placeholder="태그 검색..."
+                  class="px-3 py-1 border border-gray-300 rounded text-sm"
+                />
+                <button
+                  id="btnExportTags"
+                  class="bg-green-500 text-white px-3 py-1 rounded text-sm hover:bg-green-600"
+                >
+                  내보내기
+                </button>
+              </div>
+            </div>
+
+            <div class="overflow-x-auto">
+              <table
+                id="tagTable"
+                class="w-full border-collapse border border-gray-300 text-sm"
+              >
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="border border-gray-300 px-3 py-2 text-left w-32">
+                      Tag ID
+                    </th>
+                    <th class="border border-gray-300 px-3 py-2 text-left w-64">
+                      Description
+                    </th>
+                    <th class="border border-gray-300 px-3 py-2 text-left w-16">
+                      VR
+                    </th>
+                    <th class="border border-gray-300 px-3 py-2 text-left w-16">
+                      VM
+                    </th>
+                    <th class="border border-gray-300 px-3 py-2 text-left w-20">
+                      Length
+                    </th>
+                    <th class="border border-gray-300 px-3 py-2 text-left">
+                      Value
+                    </th>
+                  </tr>
+                </thead>
+                <tbody id="tagTableBody">
+                  <!-- 태그 데이터가 여기에 삽입됩니다 -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- 뷰어 -->
+        <div
+          id="viewerView"
+          class="hidden w-full h-screen bg-gray-900 relative"
+        >
+          <!-- 뷰어 컨트롤 패널 -->
+          <div
+            id="viewerControls"
+            class="absolute top-4 left-4 bg-white rounded-lg shadow-lg p-4 z-20 max-h-screen overflow-y-auto"
+          >
+            <!-- 파일 정보 -->
+            <div class="mb-4 pb-4 border-b border-gray-200">
+              <h3 class="font-bold text-gray-800 mb-2">파일 정보</h3>
+              <div id="imageInfo" class="text-xs text-gray-600 space-y-1">
+                <!-- 이미지 정보가 여기에 표시됩니다 -->
+              </div>
+            </div>
+
+            <!-- 뷰어 모드 -->
+            <div class="mb-4 pb-4 border-b border-gray-200">
+              <h3 class="font-bold text-gray-800 mb-2">모드</h3>
+              <div class="flex space-x-2">
+                <button
+                  id="modeSelect"
+                  class="px-3 py-1 bg-blue-500 text-white rounded text-sm hover:bg-blue-600"
+                >
+                  선택
+                </button>
+                <button
+                  id="modePan"
+                  class="px-3 py-1 bg-gray-500 text-white rounded text-sm hover:bg-gray-600"
+                >
+                  이동
+                </button>
+              </div>
+            </div>
+
+            <!-- 줌 컨트롤 -->
+            <div class="mb-4 pb-4 border-b border-gray-200">
+              <h3 class="font-bold text-gray-800 mb-2">줌</h3>
+              <div class="flex items-center space-x-2 mb-2">
+                <button
+                  id="zoomOut"
+                  class="px-2 py-1 bg-gray-500 text-white rounded text-sm hover:bg-gray-600"
+                >
+                  -
+                </button>
+                <span id="zoomValue" class="text-sm w-16 text-center"
+                  >100%</span
+                >
+                <button
+                  id="zoomIn"
+                  class="px-2 py-1 bg-gray-500 text-white rounded text-sm hover:bg-gray-600"
+                >
+                  +
+                </button>
+              </div>
+              <div class="flex space-x-1">
+                <button
+                  id="zoomFit"
+                  class="px-2 py-1 bg-blue-500 text-white rounded text-xs hover:bg-blue-600"
+                >
+                  맞춤
+                </button>
+                <button
+                  id="zoom100"
+                  class="px-2 py-1 bg-blue-500 text-white rounded text-xs hover:bg-blue-600"
+                >
+                  100%
+                </button>
+              </div>
+            </div>
+
+            <!-- 이미지 조정 -->
+            <div class="mb-4 pb-4 border-b border-gray-200">
+              <h3 class="font-bold text-gray-800 mb-2">이미지 조정</h3>
+
+              <!-- 밝기 -->
+              <div class="mb-3">
+                <label class="text-xs text-gray-600 block mb-1"
+                  >밝기: <span id="brightnessValue">0</span></label
+                >
+                <input
+                  type="range"
+                  id="brightnessSlider"
+                  min="-100"
+                  max="100"
+                  value="0"
+                  class="w-full"
+                />
+              </div>
+
+              <!-- 대비 -->
+              <div class="mb-3">
+                <label class="text-xs text-gray-600 block mb-1"
+                  >대비: <span id="contrastValue">100%</span></label
+                >
+                <input
+                  type="range"
+                  id="contrastSlider"
+                  min="50"
+                  max="200"
+                  value="100"
+                  class="w-full"
+                />
+              </div>
+
+              <!-- 자동 조정 -->
+              <div class="flex space-x-1">
+                <button
+                  id="autoContrast"
+                  class="px-2 py-1 bg-purple-500 text-white rounded text-xs hover:bg-purple-600"
+                >
+                  자동 대비
+                </button>
+                <button
+                  id="resetImage"
+                  class="px-2 py-1 bg-red-500 text-white rounded text-xs hover:bg-red-600"
+                >
+                  초기화
+                </button>
+              </div>
+            </div>
+
+            <!-- 측정 도구 -->
+            <div class="mb-4 pb-4 border-b border-gray-200">
+              <h3 class="font-bold text-gray-800 mb-2">측정 도구</h3>
+              <div class="grid grid-cols-2 gap-1 mb-2">
+                <button
+                  id="measureDistance"
+                  class="px-2 py-1 bg-green-500 text-white rounded text-xs hover:bg-green-600"
+                >
+                  거리
+                </button>
+                <button
+                  id="measureAngle"
+                  class="px-2 py-1 bg-green-500 text-white rounded text-xs hover:bg-green-600"
+                >
+                  각도
+                </button>
+                <button
+                  id="measureArea"
+                  class="px-2 py-1 bg-green-500 text-white rounded text-xs hover:bg-green-600"
+                >
+                  면적
+                </button>
+                <button
+                  id="clearMeasurements"
+                  class="px-2 py-1 bg-red-500 text-white rounded text-xs hover:bg-red-600"
+                >
+                  지우기
+                </button>
+              </div>
+
+              <!-- 측정 정보 -->
+              <div
+                id="measurementInfo"
+                class="text-xs text-gray-600 min-h-[20px] mb-2"
+              ></div>
+              <div
+                id="selectedMeasurementInfo"
+                class="text-xs text-blue-600 min-h-[16px]"
+              ></div>
+            </div>
+
+            <!-- 측정 결과 목록 -->
+            <div class="mb-4">
+              <h3 class="font-bold text-gray-800 mb-2">측정 결과</h3>
+              <div
+                id="measurementList"
+                class="space-y-1 max-h-32 overflow-y-auto"
+              >
+                <!-- 측정 결과가 여기에 표시됩니다 -->
+              </div>
+            </div>
+          </div>
+
+          <!-- 이미지 컨테이너 -->
+          <div
+            id="imageContainer"
+            class="viewer-container w-full h-full flex items-center justify-center"
+          >
+            <canvas id="imageCanvas" class="max-w-full max-h-full"></canvas>
+            <canvas
+              id="measurementCanvas"
+              class="measurement-overlay absolute top-0 left-0 w-full h-full"
+            ></canvas>
+
+            <!-- 줌 인디케이터 -->
+            <div class="zoom-indicator">
+              <span id="zoomIndicator">100%</span>
+            </div>
+
+            <!-- 픽셀 값 표시 -->
+            <div id="pixelInfo" class="tooltip hidden"></div>
+          </div>
+        </div>
+      </main>
+
+      <!-- 상태 표시 -->
+      <div
+        id="statusBar"
+        class="hidden fixed bottom-0 left-0 right-0 bg-gray-800 text-white p-2 text-sm"
+      >
+        <div class="flex justify-between items-center">
+          <div id="statusText">준비</div>
+          <div id="coordinateInfo" class="text-xs text-gray-300"></div>
+        </div>
       </div>
     </div>
 
-    <div
-      id="dicomTree"
-      class="absolute top-24 left-0 w-full h-[calc(100vh-6rem)] overflow-auto bg-white"
-    ></div>
+    <!-- 스크립트 로드 -->
+    <script type="module">
+      // 환경 설정
+      window.ENV = {
+        NODE_ENV: "development",
+        API_URL: "",
+        VERSION: "2.0.0",
+      };
 
-    <div
-      id="tagTableContainer"
-      class="hidden absolute top-24 left-0 w-full h-[calc(100vh-6rem)] overflow-auto p-4 bg-white"
-    >
-      <h2 class="text-xl font-bold mb-4">DICOM Tag 정보</h2>
-      <div class="overflow-x-auto">
-        <table
-          id="tagTable"
-          class="w-full bg-white border-collapse border border-gray-300 text-sm"
-        >
-          <thead>
-            <tr class="bg-gray-200">
-              <th class="border px-2 py-2 text-left">Tag ID</th>
-              <th class="border px-2 py-2 text-left">Description</th>
-              <th class="border px-2 py-2 text-left">VR</th>
-              <th class="border px-2 py-2 text-left">VM</th>
-              <th class="border px-2 py-2 text-left">Length</th>
-              <th class="border px-2 py-2 text-left">Value</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
-
-    <div
-      id="imageViewer"
-      class="hidden absolute top-24 left-0 w-full h-[calc(100vh-6rem)] overflow-auto flex justify-center items-center p-4 relative"
-    >
-      <img id="dicomImage" class="max-w-full max-h-full" />
-    </div>
-
-    <script type="module" src="./js/main.js"></script>
+      // 메인 애플리케이션 로드
+      import("./js/app.js").catch((error) => {
+        console.error("애플리케이션 로드 실패:", error);
+        document.body.innerHTML = `
+                <div class="min-h-screen flex items-center justify-center bg-red-50">
+                    <div class="text-center p-8">
+                        <div class="text-6xl mb-4">⚠️</div>
+                        <h1 class="text-2xl font-bold text-red-800 mb-2">애플리케이션 로드 실패</h1>
+                        <p class="text-red-600 mb-4">브라우저가 최신 JavaScript를 지원하지 않습니다.</p>
+                        <button onclick="location.reload()" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600">
+                            다시 시도
+                        </button>
+                    </div>
+                </div>
+            `;
+      });
+    </script>
   </body>
 </html>
