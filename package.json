@@ -1,0 +1,39 @@
+{
+  "name": "dicom-viewer",
+  "version": "2.0.0",
+  "description": "전문적인 DICOM 의료영상 분석 및 측정 도구",
+  "main": "app.py",
+  "scripts": {
+    "start": "python app.py",
+    "dev": "python app.py --debug",
+    "build": "echo 'Build process for production'",
+    "test": "echo 'Test process'"
+  },
+  "dependencies": {
+    "@chakra-ui/react": "^2.8.2",
+    "@emotion/react": "^11.11.1",
+    "@emotion/styled": "^11.11.0",
+    "framer-motion": "^10.16.4",
+    "d3": "^7.8.5"
+  },
+  "devDependencies": {
+    "vite": "^4.5.0",
+    "@vitejs/plugin-react": "^4.1.0",
+    "eslint": "^8.52.0",
+    "prettier": "^3.0.3"
+  },
+  "keywords": [
+    "dicom",
+    "medical",
+    "imaging",
+    "viewer",
+    "analysis",
+    "measurement"
+  ],
+  "author": "DICOM Viewer Team",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  }
+}

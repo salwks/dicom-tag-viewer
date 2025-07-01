@@ -272,14 +272,50 @@
 
         <!-- 차트 뷰 -->
         <div id="chartView" class="hidden w-full h-screen bg-white">
-          <div class="p-4">
-            <h2 class="text-2xl font-bold text-gray-800 mb-4">
-              DICOM 구조 분석
-            </h2>
+          <div class="p-4 h-full flex flex-col">
+            <div class="flex justify-between items-center mb-4">
+              <h2 class="text-2xl font-bold text-gray-800">
+                DICOM 구조 분석
+              </h2>
+              <div class="flex space-x-2">
+                <button
+                  id="chartZoomIn"
+                  class="px-3 py-1 bg-blue-500 text-white rounded text-sm hover:bg-blue-600"
+                  title="확대"
+                >
+                  +
+                </button>
+                <button
+                  id="chartZoomOut"
+                  class="px-3 py-1 bg-blue-500 text-white rounded text-sm hover:bg-blue-600"
+                  title="축소"
+                >
+                  -
+                </button>
+                <button
+                  id="chartFitView"
+                  class="px-3 py-1 bg-green-500 text-white rounded text-sm hover:bg-green-600"
+                  title="화면에 맞춤"
+                >
+                  맞춤
+                </button>
+                <button
+                  id="chartReset"
+                  class="px-3 py-1 bg-red-500 text-white rounded text-sm hover:bg-red-600"
+                  title="초기화"
+                >
+                  초기화
+                </button>
+              </div>
+            </div>
             <div
               id="chartContainer"
-              class="w-full h-full border border-gray-200 rounded-lg"
+              class="flex-1 border border-gray-200 rounded-lg bg-gray-50"
+              style="min-height: 500px;"
             ></div>
+            <div class="mt-2 text-xs text-gray-500 text-center">
+              마우스 휠로 확대/축소, 드래그로 이동, 더블클릭으로 초기화, 노드 클릭으로 상세정보
+            </div>
           </div>
         </div>
 

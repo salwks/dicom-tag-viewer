@@ -70,9 +70,7 @@ export class ViewerController {
       measureArea: document.getElementById("measureArea"),
       clearMeasurements: document.getElementById("clearMeasurements"),
       measurementInfo: document.getElementById("measurementInfo"),
-      selectedMeasurementInfo: document.getElementById(
-        "selectedMeasurementInfo"
-      ),
+      selectedMeasurementInfo: document.getElementById("selectedMeasurementInfo"),
       measurementList: document.getElementById("measurementList"),
 
       // 정보 표시
@@ -251,11 +249,27 @@ export class ViewerController {
     const container = this.elements.imageContainer;
     const rect = container.getBoundingClientRect();
 
-    // 캔버스들 크기 설정
-    [this.canvases.image, this.canvases.measurement].forEach((canvas) => {
-      canvas.width = rect.width;
-      canvas.height = rect.height;
-    });
+    // 두 캔버스 모두 컨테이너 크기에 맞춤
+    const width = rect.width;
+    const height = rect.height;
+
+    // 이미지 캔버스 크기 설정
+    this.canvases.image.width = width;
+    this.canvases.image.height = height;
+    this.canvases.image.style.width = width + 'px';
+    this.canvases.image.style.height = height + 'px';
+
+    // 측정 오버레이 캔버스 크기도 동일하게 설정
+    this.canvases.measurement.width = width;
+    this.canvases.measurement.height = height;
+    this.canvases.measurement.style.width = width + 'px';
+    this.canvases.measurement.style.height = height + 'px';
+    
+    // 측정 캔버스를 이미지 캔버스 위에 정확히 포지셔닝
+    this.canvases.measurement.style.position = 'absolute';
+    this.canvases.measurement.style.top = '0';
+    this.canvases.measurement.style.left = '0';
+    this.canvases.measurement.style.pointerEvents = 'none';
 
     this.redrawAll();
   }
@@ -348,15 +362,24 @@ export class ViewerController {
 
     if (this.viewerState.isDragging && this.viewerState.mode === "pan") {
       // 패닝 처리
-      const dx = e.clientX - this.viewerState.dragStart.x;
-      const dy = e.clientY - this.viewerState.dragStart.y;
+      if (this.viewerState.dragStart) {
+        const dx = e.clientX - this.viewerState.dragStart.x;
+        const dy = e.clientY - this.viewerState.dragStart.y;
 
-      imageProcessor.applyTransform({
-        translateX: dx,
-        translateY: dy,
-      });
+        // 현재 변환 상태 가져오기
+        const currentTransform = imageProcessor.transform || { translateX: 0, translateY: 0, scale: 1 };
+        
+        // 새로운 변환 적용
+        imageProcessor.applyTransform({
+          translateX: currentTransform.translateX + dx / currentTransform.scale,
+          translateY: currentTransform.translateY + dy / currentTransform.scale
+        });
 
-      this.redrawMeasurements();
+        // 드래그 시작점 업데이트
+        this.viewerState.dragStart = { x: e.clientX, y: e.clientY };
+        
+        this.redrawMeasurements();
+      }
     }
   }
 
@@ -474,15 +497,37 @@ export class ViewerController {
   }
 
   /**
-   * 이미지 좌표 계산
+   * 좌표 변환 (캔버스 좌표 -> 이미지 좌표)
    */
   getImagePoint(e) {
     const rect = this.elements.imageContainer.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const canvasX = e.clientX - rect.left;
+    const canvasY = e.clientY - rect.top;
 
-    // 이미지 좌표로 변환 (imageProcessor 사용)
-    return imageProcessor.canvasToImageCoordinates(x, y);
+    // 안전한 좌표 변환
+    if (!this.imageData) {
+      return { x: 0, y: 0, imageX: 0, imageY: 0 };
+    }
+
+    // 현재 변환 상태 가져오기
+    const transform = imageProcessor.transform || { scale: 1, translateX: 0, translateY: 0 };
+    
+    // 캔버스 중심점
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+    
+    // 역변환 계산
+    const imageX = ((canvasX - centerX) / transform.scale) - transform.translateX + (this.imageData.width / 2);
+    const imageY = ((canvasY - centerY) / transform.scale) - transform.translateY + (this.imageData.height / 2);
+
+    return {
+      x: Math.round(Math.max(0, Math.min(this.imageData.width - 1, imageX))),
+      y: Math.round(Math.max(0, Math.min(this.imageData.height - 1, imageY))),
+      imageX: Math.round(imageX),
+      imageY: Math.round(imageY),
+      relativeX: imageX / this.imageData.width,
+      relativeY: imageY / this.imageData.height
+    };
   }
 
   /**
@@ -491,12 +536,16 @@ export class ViewerController {
   zoomIn() {
     this.zoom(1.2);
   }
+  
   zoomOut() {
     this.zoom(0.8);
   }
 
   zoom(factor) {
-    const currentScale = imageProcessor.transform.scale;
+    if (!this.imageData) return;
+    
+    const currentTransform = imageProcessor.transform || { scale: 1 };
+    const currentScale = currentTransform.scale || 1;
     const newScale = Math.max(0.1, Math.min(5, currentScale * factor));
 
     imageProcessor.applyTransform({ scale: newScale });
@@ -505,8 +554,11 @@ export class ViewerController {
   }
 
   setZoom(scale) {
-    imageProcessor.applyTransform({ scale });
-    this.updateZoomDisplay(scale);
+    if (!this.imageData) return;
+    
+    const clampedScale = Math.max(0.1, Math.min(5, scale));
+    imageProcessor.applyTransform({ scale: clampedScale });
+    this.updateZoomDisplay(clampedScale);
     this.redrawMeasurements();
   }
 
@@ -514,14 +566,18 @@ export class ViewerController {
     if (!this.imageData) return;
 
     const container = this.elements.imageContainer;
+    if (!container) return;
+    
     const containerRect = container.getBoundingClientRect();
+    
+    if (containerRect.width === 0 || containerRect.height === 0) return;
 
     const scaleX = containerRect.width / this.imageData.width;
     const scaleY = containerRect.height / this.imageData.height;
     const scale = Math.min(scaleX, scaleY) * 0.9; // 여유 공간
 
     imageProcessor.applyTransform({
-      scale,
+      scale: scale,
       translateX: 0,
       translateY: 0,
     });
@@ -534,37 +590,51 @@ export class ViewerController {
    * 이미지 조정
    */
   setBrightness(value) {
-    imageProcessor.applyAdjustments({ brightness: parseInt(value) });
+    const brightnessValue = parseInt(value) || 0;
+    imageProcessor.applyAdjustments({ brightness: brightnessValue });
     if (this.elements.brightnessValue) {
-      this.elements.brightnessValue.textContent = value;
+      this.elements.brightnessValue.textContent = brightnessValue.toString();
     }
   }
 
   setContrast(value) {
-    const contrast = parseInt(value) / 100;
+    const contrastValue = parseInt(value) || 100;
+    const contrast = contrastValue / 100;
     imageProcessor.applyAdjustments({ contrast });
     if (this.elements.contrastValue) {
-      this.elements.contrastValue.textContent = value + "%";
+      this.elements.contrastValue.textContent = contrastValue + "%";
     }
   }
 
   autoContrast() {
-    imageProcessor.autoContrast();
+    try {
+      imageProcessor.autoContrast();
+    } catch (error) {
+      console.warn("자동 대비 조정 실패:", error);
+    }
   }
 
   resetImage() {
-    imageProcessor.reset();
-    this.updateZoomDisplay(1);
+    try {
+      imageProcessor.reset();
+      this.updateZoomDisplay(1);
 
-    // 슬라이더 초기화
-    if (this.elements.brightnessSlider)
-      this.elements.brightnessSlider.value = "0";
-    if (this.elements.brightnessValue)
-      this.elements.brightnessValue.textContent = "0";
-    if (this.elements.contrastSlider)
-      this.elements.contrastSlider.value = "100";
-    if (this.elements.contrastValue)
-      this.elements.contrastValue.textContent = "100%";
+      // 슬라이더 초기화
+      if (this.elements.brightnessSlider) {
+        this.elements.brightnessSlider.value = "0";
+      }
+      if (this.elements.brightnessValue) {
+        this.elements.brightnessValue.textContent = "0";
+      }
+      if (this.elements.contrastSlider) {
+        this.elements.contrastSlider.value = "100";
+      }
+      if (this.elements.contrastValue) {
+        this.elements.contrastValue.textContent = "100%";
+      }
+    } catch (error) {
+      console.warn("이미지 리셋 실패:", error);
+    }
   }
 
   /**
@@ -587,7 +657,10 @@ export class ViewerController {
    * UI 업데이트
    */
   updateZoomDisplay(scale) {
-    const percentage = Math.round(scale * 100);
+    // 안전한 scale 값 확인
+    const safeScale = isNaN(scale) ? 1 : Math.max(0.1, Math.min(5, scale));
+    const percentage = Math.round(safeScale * 100);
+    
     if (this.elements.zoomValue) {
       this.elements.zoomValue.textContent = percentage + "%";
     }
@@ -612,14 +685,30 @@ export class ViewerController {
   }
 
   updatePixelInfo(e) {
-    const point = this.getImagePoint(e);
-    const pixelValue = imageProcessor.getPixelValue(point.x, point.y);
-
-    if (pixelValue && this.elements.pixelInfo) {
-      this.elements.pixelInfo.textContent = `X: ${point.x}, Y: ${point.y}, Value: ${pixelValue.gray}`;
-      this.elements.pixelInfo.style.left = e.clientX + 10 + "px";
-      this.elements.pixelInfo.style.top = e.clientY - 30 + "px";
-      this.elements.pixelInfo.classList.remove("hidden");
+    if (!this.imageData || !this.elements.pixelInfo) return;
+    
+    try {
+      const point = this.getImagePoint(e);
+      
+      // 좌표가 유효한지 확인
+      if (isNaN(point.x) || isNaN(point.y)) {
+        this.elements.pixelInfo.classList.add("hidden");
+        return;
+      }
+      
+      const pixelValue = imageProcessor.getPixelValue(point.x, point.y);
+      
+      if (pixelValue) {
+        this.elements.pixelInfo.textContent = `X: ${point.x}, Y: ${point.y}, Value: ${pixelValue.gray || 0}`;
+        this.elements.pixelInfo.style.left = (e.clientX + 10) + "px";
+        this.elements.pixelInfo.style.top = (e.clientY - 30) + "px";
+        this.elements.pixelInfo.classList.remove("hidden");
+      } else {
+        this.elements.pixelInfo.classList.add("hidden");
+      }
+    } catch (error) {
+      console.warn("픽셀 정보 업데이트 실패:", error);
+      this.elements.pixelInfo.classList.add("hidden");
     }
   }
 
@@ -675,78 +764,101 @@ export class ViewerController {
    * 화면 다시 그리기
    */
   redrawAll() {
+    // 이미지 프로세서로 이미지 렌더링
     imageProcessor.render();
+    
+    // 측정 오버레이 다시 그리기
     this.redrawMeasurements();
   }
 
   redrawMeasurements() {
     const ctx = this.canvases.measurementCtx;
-    ctx.clearRect(
-      0,
-      0,
-      this.canvases.measurement.width,
-      this.canvases.measurement.height
-    );
+    if (!ctx) return;
+    
+    // 측정 캔버스 클리어
+    ctx.clearRect(0, 0, this.canvases.measurement.width, this.canvases.measurement.height);
+
+    // 현재 이미지 변환 상태 가져오기
+    const transform = imageProcessor.transform || { scale: 1, translateX: 0, translateY: 0, rotation: 0 };
+    
+    // 측정 캔버스에도 같은 변환 적용
+    ctx.save();
+    
+    // 이미지와 동일한 변환 매트릭스 적용
+    const centerX = this.canvases.measurement.width / 2;
+    const centerY = this.canvases.measurement.height / 2;
+    
+    ctx.translate(centerX, centerY);
+    ctx.scale(transform.scale, transform.scale);
+    ctx.rotate((transform.rotation * Math.PI) / 180);
+    ctx.translate(transform.translateX, transform.translateY);
 
     // 완료된 측정들 그리기
     const measurements = measurementEngine.getAllMeasurements();
     measurements.forEach((measurement) => {
-      this.drawMeasurement(ctx, measurement);
+      this.drawMeasurement(ctx, measurement, transform);
     });
 
     // 현재 그리는 중인 측정 그리기
     if (this.viewerState.currentMeasurement) {
-      this.drawCurrentMeasurement(ctx, this.viewerState.currentMeasurement);
+      this.drawCurrentMeasurement(ctx, this.viewerState.currentMeasurement, transform);
     }
+    
+    ctx.restore();
   }
 
-  drawMeasurement(ctx, measurement) {
+  drawMeasurement(ctx, measurement, transform) {
     // 기본 스타일
     ctx.strokeStyle = "#ff6b6b";
     ctx.fillStyle = "#ff6b6b";
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2 / (transform?.scale || 1); // 스케일에 따라 선 굵기 조정
 
-    const points = measurement.points.map((p) =>
-      imageProcessor.imageToCanvasCoordinates(p.imageX, p.imageY)
-    );
+    // 이미지 좌표를 측정 캔버스의 로컬 좌표로 변환
+    const points = measurement.points.map((p) => ({
+      x: p.imageX - (this.imageData.width / 2),
+      y: p.imageY - (this.imageData.height / 2)
+    }));
 
     if (measurement.type === "distance") {
       this.drawLine(ctx, points[0], points[1]);
-      this.drawPoints(ctx, points);
+      this.drawPoints(ctx, points, transform);
       this.drawLabel(
         ctx,
         measurement.label,
         (points[0].x + points[1].x) / 2,
-        (points[0].y + points[1].y) / 2
+        (points[0].y + points[1].y) / 2,
+        transform
       );
     } else if (measurement.type === "angle") {
       this.drawLine(ctx, points[1], points[0]);
       this.drawLine(ctx, points[1], points[2]);
-      this.drawPoints(ctx, points);
+      this.drawPoints(ctx, points, transform);
       this.drawLabel(
         ctx,
         measurement.label,
-        points[1].x + 20,
-        points[1].y - 20
+        points[1].x + 20 / (transform?.scale || 1),
+        points[1].y - 20 / (transform?.scale || 1),
+        transform
       );
     } else if (measurement.type === "area") {
       this.drawPolygon(ctx, points);
-      this.drawPoints(ctx, points);
+      this.drawPoints(ctx, points, transform);
       const center = this.getPolygonCenter(points);
-      this.drawLabel(ctx, measurement.label, center.x, center.y);
+      this.drawLabel(ctx, measurement.label, center.x, center.y, transform);
     }
   }
 
-  drawCurrentMeasurement(ctx, measurement) {
+  drawCurrentMeasurement(ctx, measurement, transform) {
     ctx.strokeStyle = "#4dabf7";
     ctx.fillStyle = "#4dabf7";
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2 / (transform?.scale || 1);
 
-    const points = measurement.points.map((p) =>
-      imageProcessor.imageToCanvasCoordinates(p.imageX, p.imageY)
-    );
+    const points = measurement.points.map((p) => ({
+      x: p.imageX - (this.imageData.width / 2),
+      y: p.imageY - (this.imageData.height / 2)
+    }));
 
-    this.drawPoints(ctx, points);
+    this.drawPoints(ctx, points, transform);
 
     if (points.length > 1) {
       for (let i = 0; i < points.length - 1; i++) {
@@ -762,10 +874,11 @@ export class ViewerController {
     ctx.stroke();
   }
 
-  drawPoints(ctx, points) {
+  drawPoints(ctx, points, transform) {
+    const radius = 4 / (transform?.scale || 1); // 스케일에 따라 점 크기 조정
     points.forEach((point) => {
       ctx.beginPath();
-      ctx.arc(point.x, point.y, 4, 0, 2 * Math.PI);
+      ctx.arc(point.x, point.y, radius, 0, 2 * Math.PI);
       ctx.fill();
     });
   }
@@ -785,26 +898,27 @@ export class ViewerController {
     ctx.fill();
   }
 
-  drawLabel(ctx, text, x, y) {
-    ctx.font = "12px Arial";
+  drawLabel(ctx, text, x, y, transform) {
+    const fontSize = 12 / (transform?.scale || 1); // 스케일에 따라 폰트 크기 조정
+    ctx.font = `${fontSize}px Arial`;
     ctx.fillStyle = "white";
     ctx.strokeStyle = "black";
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 3 / (transform?.scale || 1);
 
     // 배경
     const metrics = ctx.measureText(text);
-    const padding = 4;
+    const padding = 4 / (transform?.scale || 1);
     ctx.fillRect(
       x - metrics.width / 2 - padding,
-      y - 12 - padding,
+      y - fontSize - padding,
       metrics.width + 2 * padding,
-      16 + 2 * padding
+      fontSize + 2 * padding
     );
     ctx.strokeRect(
       x - metrics.width / 2 - padding,
-      y - 12 - padding,
+      y - fontSize - padding,
       metrics.width + 2 * padding,
-      16 + 2 * padding
+      fontSize + 2 * padding
     );
 
     // 텍스트

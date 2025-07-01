@@ -106,9 +106,25 @@ class ImageProcessor {
    * @param {Object} newTransform - 새로운 변환 값
    */
   applyTransform(newTransform) {
-    Object.assign(this.transform, newTransform);
-    this.render();
+    // 기본값으로 초기화
+    if (!this.transform) {
+      this.transform = {
+        scale: 1,
+        translateX: 0,
+        translateY: 0,
+        rotation: 0,
+      };
+    }
 
+    // 안전한 값으로 업데이트
+    Object.keys(newTransform).forEach(key => {
+      const value = newTransform[key];
+      if (!isNaN(value) && isFinite(value)) {
+        this.transform[key] = value;
+      }
+    });
+
+    this.render();
     appState.setState("viewer.transform", { ...this.transform });
   }
 
