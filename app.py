@@ -1,6 +1,14 @@
 import os
+import re
 import mimetypes
-from flask import Flask, request, jsonify, send_file
+from flask import (
+    Flask,
+    request,
+    jsonify,
+    send_file,
+    send_from_directory,
+    render_template_string,
+)
 from werkzeug.utils import secure_filename
 from pydicom import dcmread
 from pydicom.datadict import dictionary_description
@@ -26,6 +34,354 @@ UPLOAD_FOLDER = "uploads"
 
 # 업로드 폴더 생성
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+
+# 브라우저 감지 클래스
+class BrowserDetector:
+    def __init__(self):
+        self.patterns = {
+            "chrome": r"Chrome/(\d+)",
+            "firefox": r"Firefox/(\d+)",
+            "safari": r"Version/(\d+).*Safari",
+            "edge": r"Edg/(\d+)",
+            "ie": r"MSIE (\d+)|Trident.*rv:(\d+)",
+        }
+
+        self.es6_support = {
+            "chrome": 51,
+            "firefox": 54,
+            "safari": 10,
+            "edge": 15,
+            "ie": 0,  # IE는 ES6 모듈 미지원
+        }
+
+        self.module_support = {
+            "chrome": 61,
+            "firefox": 60,
+            "safari": 11,
+            "edge": 79,
+            "ie": 0,
+        }
+
+    def detect_browser(self, user_agent):
+        """User-Agent에서 브라우저 정보 추출"""
+        for browser, pattern in self.patterns.items():
+            match = re.search(pattern, user_agent)
+            if match:
+                version = int(match.group(1) or match.group(2) or 0)
+                return {"name": browser, "version": version, "user_agent": user_agent}
+
+        return {"name": "unknown", "version": 0, "user_agent": user_agent}
+
+    def supports_es6(self, browser_info):
+        """ES6 지원 여부 확인"""
+        browser = browser_info["name"]
+        version = browser_info["version"]
+
+        if browser in self.es6_support:
+            return version >= self.es6_support[browser]
+
+        return False
+
+    def supports_modules(self, browser_info):
+        """ES6 모듈 지원 여부 확인"""
+        browser = browser_info["name"]
+        version = browser_info["version"]
+
+        if browser in self.module_support:
+            return version >= self.module_support[browser]
+
+        return False
+
+    def get_compatibility_level(self, browser_info):
+        """브라우저 호환성 레벨 반환"""
+        if self.supports_modules(browser_info):
+            return "modern"
+        elif self.supports_es6(browser_info):
+            return "intermediate"
+        else:
+            return "legacy"
+
+
+# 브라우저 감지기 인스턴스 생성
+browser_detector = BrowserDetector()
+
+# 적응형 HTML 템플릿들
+TEMPLATES = {
+    "modern": """
+    <!doctype html>
+    <html lang="ko">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>DICOM 분석기 - 의료영상 뷰어</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <script src="https://d3js.org/d3.v6.min.js"></script>
+        <style>
+            .drag-over { background-color: rgba(59, 130, 246, 0.1); border: 2px dashed #3b82f6; }
+            .loading-spinner { animation: spin 1s linear infinite; }
+            @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        </style>
+    </head>
+    <body>
+        <div id="app">{{ content | safe }}</div>
+        
+        <!-- ES6 모듈 로드 -->
+        <script type="module">
+            // 환경 설정
+            window.ENV = { NODE_ENV: "production", API_URL: "", VERSION: "2.0.0" };
+            
+            try {
+                const { default: app } = await import('./js/app.js');
+                console.log('DICOM 분석기가 성공적으로 로드되었습니다.');
+            } catch (error) {
+                console.error('모듈 로드 실패:', error);
+                // 폴백으로 레거시 버전 로드
+                window.location.href = '/legacy';
+            }
+        </script>
+        
+        <!-- 폴백 -->
+        <script nomodule>
+            window.location.href = '/legacy';
+        </script>
+    </body>
+    </html>
+    """,
+    "legacy": """
+    <!doctype html>
+    <html lang="ko">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>DICOM 분석기 - 기본 버전</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <!-- 폴리필 추가 -->
+        <script src="https://polyfill.io/v3/polyfill.min.js?features=fetch,Promise,Array.prototype.includes"></script>
+        <style>
+            .drag-over { background-color: rgba(59, 130, 246, 0.1); border: 2px dashed #3b82f6; }
+            .loading-spinner { animation: spin 1s linear infinite; }
+            @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        </style>
+    </head>
+    <body>
+        <!-- 브라우저 업데이트 알림 -->
+        <div id="browser-notice" style="
+            position: fixed; top: 0; left: 0; right: 0; 
+            background: #fbbf24; color: #92400e; padding: 8px; 
+            text-align: center; font-size: 14px; z-index: 9999;
+        ">
+            ⚠️ 구형 브라우저가 감지되었습니다. 모든 기능을 사용하려면 브라우저를 업데이트해주세요.
+            <button onclick="document.getElementById('browser-notice').style.display='none'" 
+                    style="margin-left: 10px; background: none; border: 1px solid; padding: 2px 8px;">닫기</button>
+        </div>
+        
+        <div id="app" style="padding-top: 40px;">{{ content | safe }}</div>
+        
+        <!-- ES5 호환 기본 스크립트 -->
+        <script>
+            (function() {
+                'use strict';
+                
+                // 기본 상태 관리
+                var state = {
+                    currentFile: null,
+                    isLoading: false
+                };
+                
+                // 기본 파일 선택 기능
+                function setupBasicFileUpload() {
+                    var fileInput = document.getElementById('fileInput');
+                    var btnSelectFile = document.getElementById('btnSelectFile');
+                    var btnSelectFileWelcome = document.getElementById('btnSelectFileWelcome');
+                    
+                    function selectFile() {
+                        if (fileInput) fileInput.click();
+                    }
+                    
+                    if (btnSelectFile) {
+                        btnSelectFile.addEventListener('click', selectFile);
+                    }
+                    if (btnSelectFileWelcome) {
+                        btnSelectFileWelcome.addEventListener('click', selectFile);
+                    }
+                    
+                    if (fileInput) {
+                        fileInput.addEventListener('change', function(e) {
+                            var file = e.target.files[0];
+                            if (file) {
+                                handleFileSelected(file);
+                            }
+                        });
+                    }
+                }
+                
+                function handleFileSelected(file) {
+                    if (!file) return;
+                    
+                    // 기본 파일 검증
+                    var allowedExtensions = ['.dcm', '.dicom', '.dic'];
+                    var fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+                    
+                    if (fileExtension && allowedExtensions.indexOf(fileExtension) === -1) {
+                        alert('지원하지 않는 파일 형식입니다. .dcm, .dicom, .dic 파일만 지원됩니다.');
+                        return;
+                    }
+                    
+                    if (file.size > 100 * 1024 * 1024) {
+                        alert('파일 크기가 너무 큽니다. 100MB 이하의 파일을 선택해주세요.');
+                        return;
+                    }
+                    
+                    // 파일 정보 표시
+                    var fileInfo = document.getElementById('fileInfo');
+                    var fileName = document.getElementById('fileName');
+                    var fileSize = document.getElementById('fileSize');
+                    
+                    if (fileName) fileName.textContent = file.name;
+                    if (fileSize) fileSize.textContent = '(' + formatFileSize(file.size) + ')';
+                    if (fileInfo) fileInfo.classList.remove('hidden');
+                    
+                    // 업로드 버튼 활성화
+                    var btnUpload = document.getElementById('btnUpload');
+                    if (btnUpload) {
+                        btnUpload.disabled = false;
+                        btnUpload.classList.remove('opacity-50', 'cursor-not-allowed');
+                        btnUpload.addEventListener('click', function() {
+                            uploadFile(file);
+                        });
+                    }
+                    
+                    state.currentFile = file;
+                }
+                
+                function formatFileSize(bytes) {
+                    if (bytes === 0) return '0 Bytes';
+                    var k = 1024;
+                    var sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                    var i = Math.floor(Math.log(bytes) / Math.log(k));
+                    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+                }
+                
+                function uploadFile(file) {
+                    if (state.isLoading) return;
+                    
+                    state.isLoading = true;
+                    
+                    // 로딩 표시
+                    var loadingIndicator = document.getElementById('loadingIndicator');
+                    if (loadingIndicator) {
+                        loadingIndicator.classList.remove('hidden');
+                    }
+                    
+                    // FormData 생성
+                    var formData = new FormData();
+                    formData.append('file', file);
+                    
+                    // XMLHttpRequest 사용 (fetch 대신)
+                    var xhr = new XMLHttpRequest();
+                    
+                    xhr.onreadystatechange = function() {
+                        if (xhr.readyState === 4) {
+                            state.isLoading = false;
+                            
+                            if (loadingIndicator) {
+                                loadingIndicator.classList.add('hidden');
+                            }
+                            
+                            if (xhr.status === 200) {
+                                try {
+                                    var response = JSON.parse(xhr.responseText);
+                                    handleUploadSuccess(response);
+                                } catch (e) {
+                                    handleUploadError('서버 응답을 파싱할 수 없습니다.');
+                                }
+                            } else {
+                                handleUploadError('업로드 실패: ' + xhr.status);
+                            }
+                        }
+                    };
+                    
+                    xhr.onerror = function() {
+                        state.isLoading = false;
+                        if (loadingIndicator) {
+                            loadingIndicator.classList.add('hidden');
+                        }
+                        handleUploadError('네트워크 오류가 발생했습니다.');
+                    };
+                    
+                    xhr.open('POST', '/upload');
+                    xhr.send(formData);
+                }
+                
+                function handleUploadSuccess(response) {
+                    alert('DICOM 파일 업로드가 완료되었습니다!\\n\\n' + 
+                          '현재 브라우저에서는 기본 기능만 제공됩니다.\\n' +
+                          '전체 기능을 사용하려면 최신 브라우저를 사용해주세요.');
+                }
+                
+                function handleUploadError(message) {
+                    alert('오류: ' + message);
+                }
+                
+                // 초기화
+                function init() {
+                    console.log('DICOM 뷰어 기본 모드로 시작됩니다.');
+                    setupBasicFileUpload();
+                }
+                
+                // DOM 로드 완료 시 초기화
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', init);
+                } else {
+                    init();
+                }
+            })();
+        </script>
+    </body>
+    </html>
+    """,
+}
+
+# 기본 콘텐츠
+DEFAULT_CONTENT = """
+<div class="min-h-screen flex items-center justify-center bg-gray-50">
+    <div class="text-center p-8">
+        <div class="text-8xl mb-6">🏥</div>
+        <h1 class="text-4xl font-bold text-gray-800 mb-4">DICOM 분석기</h1>
+        <p class="text-xl text-gray-600 mb-8">의료영상 파일을 분석하고 측정하세요</p>
+        
+        <div class="space-y-4 max-w-md mx-auto">
+            <input type="file" id="fileInput" accept=".dcm,.dicom,.dic" class="hidden">
+            <button id="btnSelectFileWelcome" onclick="document.getElementById('fileInput').click()" 
+                    class="w-full bg-blue-500 text-white py-3 px-6 rounded-lg text-lg hover:bg-blue-600 transition-colors">
+                파일 선택하기
+            </button>
+            <div class="text-sm text-gray-500">
+                DICOM 파일(.dcm, .dicom, .dic)을 지원합니다
+            </div>
+        </div>
+        
+        <!-- 파일 정보 -->
+        <div id="fileInfo" class="text-sm text-gray-600 hidden mt-4">
+            <span id="fileName" class="font-medium"></span>
+            <span id="fileSize" class="text-gray-500"></span>
+        </div>
+        
+        <!-- 업로드 버튼 -->
+        <button id="btnUpload" disabled
+                class="mt-4 bg-green-500 text-white px-6 py-2 rounded hover:bg-green-600 transition-colors opacity-50 cursor-not-allowed">
+            분석 시작
+        </button>
+        
+        <!-- 로딩 인디케이터 -->
+        <div id="loadingIndicator" class="hidden flex items-center justify-center space-x-2 mt-4">
+            <div class="loading-spinner w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full"></div>
+            <span class="text-sm text-gray-600">처리 중...</span>
+        </div>
+    </div>
+</div>
+"""
 
 
 class DicomProcessor:
@@ -267,10 +623,88 @@ class DicomProcessor:
             return None, f"미리보기 생성 실패: {str(e)}"
 
 
+# 브라우저별 라우트
 @app.route("/")
 def index():
-    """메인 페이지"""
-    return app.send_static_file("index.html")
+    """브라우저에 따른 적응형 메인 페이지"""
+    user_agent = request.headers.get("User-Agent", "")
+    browser_info = browser_detector.detect_browser(user_agent)
+    compatibility_level = browser_detector.get_compatibility_level(browser_info)
+
+    # 로깅
+    logger.info(
+        f"Browser detected: {browser_info['name']} {browser_info['version']}, "
+        f"Compatibility: {compatibility_level}"
+    )
+
+    # 적절한 템플릿 선택 (레거시를 기본으로)
+    if compatibility_level == "modern":
+        template = TEMPLATES["modern"]
+    else:
+        template = TEMPLATES["legacy"]
+
+    return render_template_string(template, content=DEFAULT_CONTENT)
+
+
+@app.route("/modern")
+def modern_version():
+    """모던 브라우저용 강제 버전"""
+    return render_template_string(TEMPLATES["modern"], content=DEFAULT_CONTENT)
+
+
+@app.route("/legacy")
+def legacy_version():
+    """구형 브라우저용 강제 버전"""
+    return render_template_string(TEMPLATES["legacy"], content=DEFAULT_CONTENT)
+
+
+@app.route("/compatibility-check")
+def compatibility_check():
+    """브라우저 호환성 체크 API"""
+    user_agent = request.headers.get("User-Agent", "")
+    browser_info = browser_detector.detect_browser(user_agent)
+
+    return jsonify(
+        {
+            "browser": browser_info,
+            "supports_es6": browser_detector.supports_es6(browser_info),
+            "supports_modules": browser_detector.supports_modules(browser_info),
+            "compatibility_level": browser_detector.get_compatibility_level(
+                browser_info
+            ),
+            "recommendations": get_browser_recommendations(browser_info),
+        }
+    )
+
+
+def get_browser_recommendations(browser_info):
+    """브라우저별 권장사항 반환"""
+    browser = browser_info["name"]
+    version = browser_info["version"]
+
+    recommendations = []
+
+    if browser == "ie":
+        recommendations.append(
+            "Internet Explorer는 지원되지 않습니다. Chrome, Firefox, Safari, Edge를 사용해주세요."
+        )
+    elif browser == "chrome" and version < 61:
+        recommendations.append("Chrome을 최신 버전으로 업데이트해주세요.")
+    elif browser == "firefox" and version < 60:
+        recommendations.append("Firefox를 최신 버전으로 업데이트해주세요.")
+    elif browser == "safari" and version < 11:
+        recommendations.append("Safari를 최신 버전으로 업데이트해주세요.")
+    elif browser == "edge" and version < 79:
+        recommendations.append("Edge를 최신 버전으로 업데이트해주세요.")
+    elif browser == "unknown":
+        recommendations.append(
+            "브라우저를 확인할 수 없습니다. Chrome, Firefox, Safari, Edge 사용을 권장합니다."
+        )
+
+    if not recommendations:
+        recommendations.append("브라우저가 모든 기능을 지원합니다.")
+
+    return recommendations
 
 
 @app.route("/upload", methods=["POST"])
@@ -357,6 +791,61 @@ def health_check():
             "allowed_extensions": list(ALLOWED_EXTENSIONS),
         }
     )
+
+
+# 정적 파일 라우팅 (브라우저별)
+@app.route("/static/dist/<path:filename>")
+def serve_dist_files(filename):
+    """브라우저별 빌드 파일 제공"""
+    user_agent = request.headers.get("User-Agent", "")
+    browser_info = browser_detector.detect_browser(user_agent)
+    compatibility_level = browser_detector.get_compatibility_level(browser_info)
+
+    # 적절한 빌드 디렉토리에서 파일 제공
+    if compatibility_level == "modern":
+        dist_path = os.path.join("static", "dist", "modern")
+    else:
+        dist_path = os.path.join("static", "dist", "legacy")
+
+    try:
+        return send_from_directory(dist_path, filename)
+    except FileNotFoundError:
+        # 파일이 없으면 기본 static 폴더에서 찾기
+        return send_from_directory("static", filename)
+
+
+# Content Security Policy 헤더 추가
+@app.after_request
+def add_security_headers(response):
+    """보안 헤더 추가"""
+    user_agent = request.headers.get("User-Agent", "")
+    browser_info = browser_detector.detect_browser(user_agent)
+
+    # 모던 브라우저에는 더 엄격한 CSP 적용
+    if browser_detector.supports_modules(browser_info):
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://d3js.org; "
+            "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; "
+            "img-src 'self' data: blob:; "
+            "connect-src 'self';"
+        )
+    else:
+        # 구형 브라우저에는 덜 엄격한 CSP 적용
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://d3js.org https://polyfill.io; "
+            "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; "
+            "img-src 'self' data: blob:; "
+            "connect-src 'self';"
+        )
+
+    # 기본 보안 헤더들
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+
+    return response
 
 
 @app.errorhandler(413)
