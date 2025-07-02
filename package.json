@@ -7,20 +7,24 @@
     "start": "python app.py",
     "dev": "python app.py --debug",
     "build": "echo 'Build process for production'",
-    "test": "echo 'Test process'"
+    "test": "echo 'Test process'",
+    "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,css,scss,md,html}\"",
+    "format:check": "prettier --check \"**/*.{js,jsx,ts,tsx,json,css,scss,md,html}\"",
+    "lint": "eslint \"static/js/**/*.js\" --fix",
+    "lint:check": "eslint \"static/js/**/*.js\""
   },
   "dependencies": {
     "@chakra-ui/react": "^2.8.2",
     "@emotion/react": "^11.11.1",
     "@emotion/styled": "^11.11.0",
-    "framer-motion": "^10.16.4",
-    "d3": "^7.8.5"
+    "d3": "^7.8.5",
+    "framer-motion": "^10.16.4"
   },
   "devDependencies": {
-    "vite": "^4.5.0",
     "@vitejs/plugin-react": "^4.1.0",
     "eslint": "^8.52.0",
-    "prettier": "^3.0.3"
+    "prettier": "^3.6.2",
+    "vite": "^4.5.0"
   },
   "keywords": [
     "dicom",

@@ -1,1 +1,257 @@
 /* Custom styles (optional) */
+/* 기존 스타일에 추가할 CSS */
+
+/* 뷰어 컨테이너 스타일 개선 */
+.viewer-container {
+  position: relative;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+/* 캔버스 스타일 개선 */
+#imageCanvas,
+#measurementCanvas {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100% !important;
+  height: 100% !important;
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+  image-rendering: -webkit-crisp-edges;
+}
+
+#measurementCanvas {
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* 드래그 커서 */
+.viewer-container.grabbing {
+  cursor: grabbing !important;
+}
+
+.viewer-container.grab {
+  cursor: grab !important;
+}
+
+.viewer-container.crosshair {
+  cursor: crosshair !important;
+}
+
+/* 픽셀 정보 툴팁 */
+#pixelInfo {
+  pointer-events: none;
+  z-index: 1000;
+  transition: opacity 0.2s ease;
+}
+
+/* 줌 인디케이터 */
+.zoom-indicator {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  z-index: 15;
+}
+
+/* 측정 도구 활성화 상태 */
+.tool-active {
+  background-color: #1d4ed8 !important;
+  box-shadow: 0 0 0 2px #93c5fd;
+}
+
+/* 측정 결과 리스트 */
+#measurementList {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e0 transparent;
+}
+
+#measurementList::-webkit-scrollbar {
+  width: 4px;
+}
+
+#measurementList::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#measurementList::-webkit-scrollbar-thumb {
+  background: #cbd5e0;
+  border-radius: 2px;
+}
+
+#measurementList::-webkit-scrollbar-thumb:hover {
+  background: #a0aec0;
+}
+
+/* 뷰어 컨트롤 패널 */
+#viewerControls {
+  backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  max-width: 250px;
+  max-height: calc(100vh - 2rem);
+}
+
+/* 반응형 뷰어 컨트롤 */
+@media (max-width: 768px) {
+  #viewerControls {
+    position: fixed;
+    top: auto;
+    bottom: 4px;
+    left: 4px;
+    right: 4px;
+    max-width: none;
+    max-height: 40vh;
+    border-radius: 8px 8px 0 0;
+  }
+
+  .viewer-container {
+    padding-bottom: 45vh;
+  }
+}
+
+/* 슬라이더 스타일 개선 */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: #e2e8f0;
+  border-radius: 2px;
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: #3b82f6;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: #3b82f6;
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+}
+
+/* 버튼 호버 효과 개선 */
+button {
+  transition: all 0.2s ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+button:active {
+  transform: translateY(0);
+}
+
+/* 로딩 상태 */
+.viewer-loading {
+  position: relative;
+}
+
+.viewer-loading::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 40px;
+  height: 40px;
+  margin: -20px 0 0 -20px;
+  border: 3px solid #e2e8f0;
+  border-top: 3px solid #3b82f6;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  z-index: 100;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* 측정 라벨 애니메이션 */
+.measurement-label {
+  animation: fadeInScale 0.3s ease-out;
+}
+
+@keyframes fadeInScale {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* 에러 상태 */
+.viewer-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ef4444;
+  font-size: 14px;
+}
+
+.viewer-error::before {
+  content: "⚠️";
+  margin-right: 8px;
+  font-size: 18px;
+}
+
+/* 고대비 모드 지원 */
+@media (prefers-contrast: high) {
+  #viewerControls {
+    background: white;
+    border: 2px solid black;
+  }
+
+  button {
+    border: 1px solid black;
+  }
+}
+
+/* 다크모드 지원 */
+@media (prefers-color-scheme: dark) {
+  #viewerControls {
+    background: rgba(31, 41, 55, 0.95);
+    color: white;
+    border: 1px solid rgba(75, 85, 99, 0.3);
+  }
+
+  #viewerControls h3 {
+    color: #f9fafb;
+  }
+
+  #viewerControls .text-gray-600 {
+    color: #d1d5db;
+  }
+
+  #viewerControls .border-gray-200 {
+    border-color: #4b5563;
+  }
+}

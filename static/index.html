@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
@@ -18,7 +18,7 @@
 
     <!-- Custom Styles -->
     <style>
-      /* 커스텀 스타일 */
+      /* 기존 커스텀 스타일 */
       .drag-over {
         background-color: rgba(59, 130, 246, 0.1);
         border: 2px dashed #3b82f6;
@@ -37,26 +37,6 @@
         }
       }
 
-      .measurement-overlay {
-        pointer-events: none;
-      }
-
-      .viewer-container {
-        position: relative;
-        overflow: hidden;
-      }
-
-      .zoom-indicator {
-        position: absolute;
-        top: 10px;
-        right: 10px;
-        background: rgba(0, 0, 0, 0.7);
-        color: white;
-        padding: 4px 8px;
-        border-radius: 4px;
-        font-size: 12px;
-      }
-
       .error-modal {
         animation: slideIn 0.3s ease-out;
       }
@@ -70,7 +50,6 @@
         }
       }
 
-      /* 드래그 앤 드롭 영역 */
       .drop-zone {
         transition: all 0.3s ease;
       }
@@ -80,18 +59,10 @@
         box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
       }
 
-      /* 측정 도구 버튼 활성화 상태 */
-      .tool-active {
-        background-color: #1d4ed8 !important;
-        box-shadow: 0 0 0 2px #93c5fd;
-      }
-
-      /* 프로그레스 바 */
       .progress-bar {
         transition: width 0.3s ease;
       }
 
-      /* 툴팁 */
       .tooltip {
         position: absolute;
         background: rgba(0, 0, 0, 0.8);
@@ -101,6 +72,193 @@
         font-size: 12px;
         pointer-events: none;
         z-index: 1000;
+      }
+
+      /* 새로운 뷰어 스타일 */
+      .viewer-container {
+        position: relative;
+        overflow: hidden;
+        user-select: none;
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+      }
+
+      #imageCanvas,
+      #measurementCanvas {
+        display: block;
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100% !important;
+        height: 100% !important;
+        image-rendering: pixelated;
+        image-rendering: -moz-crisp-edges;
+        image-rendering: crisp-edges;
+        image-rendering: -webkit-crisp-edges;
+      }
+
+      #measurementCanvas {
+        pointer-events: none;
+        z-index: 10;
+      }
+
+      .viewer-container.grabbing {
+        cursor: grabbing !important;
+      }
+
+      .viewer-container.grab {
+        cursor: grab !important;
+      }
+
+      .viewer-container.crosshair {
+        cursor: crosshair !important;
+      }
+
+      #pixelInfo {
+        pointer-events: none;
+        z-index: 1000;
+        transition: opacity 0.2s ease;
+      }
+
+      .zoom-indicator {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        z-index: 15;
+      }
+
+      .tool-active {
+        background-color: #1d4ed8 !important;
+        box-shadow: 0 0 0 2px #93c5fd;
+      }
+
+      #measurementList {
+        scrollbar-width: thin;
+        scrollbar-color: #cbd5e0 transparent;
+      }
+
+      #measurementList::-webkit-scrollbar {
+        width: 4px;
+      }
+
+      #measurementList::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      #measurementList::-webkit-scrollbar-thumb {
+        background: #cbd5e0;
+        border-radius: 2px;
+      }
+
+      #measurementList::-webkit-scrollbar-thumb:hover {
+        background: #a0aec0;
+      }
+
+      #viewerControls {
+        backdrop-filter: blur(10px);
+        background: rgba(255, 255, 255, 0.95);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        max-width: 250px;
+        max-height: calc(100vh - 2rem);
+      }
+
+      @media (max-width: 768px) {
+        #viewerControls {
+          position: fixed;
+          top: auto;
+          bottom: 4px;
+          left: 4px;
+          right: 4px;
+          max-width: none;
+          max-height: 40vh;
+          border-radius: 8px 8px 0 0;
+        }
+
+        .viewer-container {
+          padding-bottom: 45vh;
+        }
+      }
+
+      input[type="range"] {
+        -webkit-appearance: none;
+        appearance: none;
+        height: 4px;
+        background: #e2e8f0;
+        border-radius: 2px;
+        outline: none;
+      }
+
+      input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 16px;
+        height: 16px;
+        background: #3b82f6;
+        border-radius: 50%;
+        cursor: pointer;
+      }
+
+      input[type="range"]::-moz-range-thumb {
+        width: 16px;
+        height: 16px;
+        background: #3b82f6;
+        border-radius: 50%;
+        cursor: pointer;
+        border: none;
+      }
+
+      button {
+        transition: all 0.2s ease;
+      }
+
+      button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+
+      button:active {
+        transform: translateY(0);
+      }
+
+      .measurement-label {
+        animation: fadeInScale 0.3s ease-out;
+      }
+
+      @keyframes fadeInScale {
+        from {
+          opacity: 0;
+          transform: scale(0.8);
+        }
+        to {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+
+      @media (prefers-color-scheme: dark) {
+        #viewerControls {
+          background: rgba(31, 41, 55, 0.95);
+          color: white;
+          border: 1px solid rgba(75, 85, 99, 0.3);
+        }
+
+        #viewerControls h3 {
+          color: #f9fafb;
+        }
+
+        #viewerControls .text-gray-600 {
+          color: #d1d5db;
+        }
+
+        #viewerControls .border-gray-200 {
+          border-color: #4b5563;
+        }
       }
     </style>
   </head>
@@ -274,104 +432,100 @@
         <div id="chartView" class="hidden w-full h-screen bg-white">
           <div class="p-4 h-full flex flex-col">
             <div class="flex justify-between items-center mb-4">
-              <h2 class="text-2xl font-bold text-gray-800">
-                DICOM 구조 분석
-              </h2>
+              <h2 class="text-2xl font-bold text-gray-800">DICOM 구조 분석</h2>
               <div class="flex space-x-2">
                 <button
-                  id="chartZoomIn"
-                  class="px-3 py-1 bg-blue-500 text-white rounded text-sm hover:bg-blue-600"
-                  title="확대"
+                  id="btnExportChart"
+                  class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600"
                 >
-                  +
+                  차트 내보내기
                 </button>
                 <button
-                  id="chartZoomOut"
-                  class="px-3 py-1 bg-blue-500 text-white rounded text-sm hover:bg-blue-600"
-                  title="축소"
+                  id="btnExpandChart"
+                  class="bg-gray-500 text-white px-3 py-1 rounded text-sm hover:bg-gray-600"
                 >
-                  -
+                  전체 확장
                 </button>
                 <button
-                  id="chartFitView"
-                  class="px-3 py-1 bg-green-500 text-white rounded text-sm hover:bg-green-600"
-                  title="화면에 맞춤"
+                  id="btnCollapseChart"
+                  class="bg-gray-500 text-white px-3 py-1 rounded text-sm hover:bg-gray-600"
                 >
-                  맞춤
-                </button>
-                <button
-                  id="chartReset"
-                  class="px-3 py-1 bg-red-500 text-white rounded text-sm hover:bg-red-600"
-                  title="초기화"
-                >
-                  초기화
+                  전체 축소
                 </button>
               </div>
             </div>
-            <div
-              id="chartContainer"
-              class="flex-1 border border-gray-200 rounded-lg bg-gray-50"
-              style="min-height: 500px;"
-            ></div>
-            <div class="mt-2 text-xs text-gray-500 text-center">
-              마우스 휠로 확대/축소, 드래그로 이동, 더블클릭으로 초기화, 노드 클릭으로 상세정보
+
+            <!-- 차트 컨테이너 -->
+            <div class="flex-1 bg-gray-50 rounded-lg p-4 overflow-hidden">
+              <div id="chartContainer" class="w-full h-full"></div>
             </div>
           </div>
         </div>
 
         <!-- 테이블 뷰 -->
-        <div
-          id="tableView"
-          class="hidden w-full h-screen bg-white overflow-auto"
-        >
-          <div class="p-4">
+        <div id="tableView" class="hidden w-full h-screen bg-white">
+          <div class="p-4 h-full flex flex-col">
             <div class="flex justify-between items-center mb-4">
               <h2 class="text-2xl font-bold text-gray-800">DICOM 태그 정보</h2>
-              <div class="flex space-x-2">
-                <input
-                  type="text"
-                  id="tagSearch"
-                  placeholder="태그 검색..."
-                  class="px-3 py-1 border border-gray-300 rounded text-sm"
-                />
+              <div class="flex items-center space-x-4">
+                <!-- 검색 -->
+                <div class="relative">
+                  <input
+                    type="text"
+                    id="tagSearch"
+                    placeholder="태그 검색..."
+                    class="border border-gray-300 rounded px-3 py-1 pr-8 text-sm"
+                  />
+                  <div
+                    class="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400"
+                  >
+                    🔍
+                  </div>
+                </div>
+
+                <!-- 필터 -->
+                <select
+                  id="tagFilter"
+                  class="border border-gray-300 rounded px-3 py-1 text-sm"
+                >
+                  <option value="all">전체</option>
+                  <option value="basic">기본 정보</option>
+                  <option value="image">이미지 정보</option>
+                  <option value="patient">환자 정보</option>
+                  <option value="study">검사 정보</option>
+                </select>
+
+                <!-- 내보내기 -->
                 <button
-                  id="btnExportTags"
+                  id="btnExportTable"
                   class="bg-green-500 text-white px-3 py-1 rounded text-sm hover:bg-green-600"
                 >
-                  내보내기
+                  CSV 내보내기
                 </button>
               </div>
             </div>
 
-            <div class="overflow-x-auto">
-              <table
-                id="tagTable"
-                class="w-full border-collapse border border-gray-300 text-sm"
-              >
-                <thead class="bg-gray-50">
+            <!-- 테이블 컨테이너 -->
+            <div class="flex-1 overflow-auto bg-gray-50 rounded-lg">
+              <table id="tagsTable" class="w-full">
+                <thead class="bg-gray-100 sticky top-0">
                   <tr>
-                    <th class="border border-gray-300 px-3 py-2 text-left w-32">
-                      Tag ID
+                    <th class="text-left p-3 font-semibold text-gray-700">
+                      태그
                     </th>
-                    <th class="border border-gray-300 px-3 py-2 text-left w-64">
-                      Description
+                    <th class="text-left p-3 font-semibold text-gray-700">
+                      이름
                     </th>
-                    <th class="border border-gray-300 px-3 py-2 text-left w-16">
+                    <th class="text-left p-3 font-semibold text-gray-700">
+                      값
+                    </th>
+                    <th class="text-left p-3 font-semibold text-gray-700">
                       VR
-                    </th>
-                    <th class="border border-gray-300 px-3 py-2 text-left w-16">
-                      VM
-                    </th>
-                    <th class="border border-gray-300 px-3 py-2 text-left w-20">
-                      Length
-                    </th>
-                    <th class="border border-gray-300 px-3 py-2 text-left">
-                      Value
                     </th>
                   </tr>
                 </thead>
-                <tbody id="tagTableBody">
-                  <!-- 태그 데이터가 여기에 삽입됩니다 -->
+                <tbody id="tagsTableBody">
+                  <!-- 태그 데이터가 여기에 표시됩니다 -->
                 </tbody>
               </table>
             </div>
@@ -558,62 +712,87 @@
           <!-- 이미지 컨테이너 -->
           <div
             id="imageContainer"
-            class="viewer-container w-full h-full flex items-center justify-center"
+            class="viewer-container w-full h-full relative overflow-hidden"
+            style="background: #1a1a1a"
           >
-            <canvas id="imageCanvas" class="max-w-full max-h-full"></canvas>
+            <!-- 이미지 캔버스 -->
+            <canvas
+              id="imageCanvas"
+              class="absolute top-0 left-0 w-full h-full"
+              style="
+                image-rendering: pixelated;
+                image-rendering: -moz-crisp-edges;
+                image-rendering: crisp-edges;
+              "
+            ></canvas>
+
+            <!-- 측정 오버레이 캔버스 -->
             <canvas
               id="measurementCanvas"
-              class="measurement-overlay absolute top-0 left-0 w-full h-full"
+              class="absolute top-0 left-0 w-full h-full pointer-events-none"
+              style="z-index: 10"
             ></canvas>
 
             <!-- 줌 인디케이터 -->
-            <div class="zoom-indicator">
+            <div
+              class="absolute top-4 right-4 bg-black bg-opacity-70 text-white px-2 py-1 rounded text-sm"
+            >
               <span id="zoomIndicator">100%</span>
             </div>
 
             <!-- 픽셀 값 표시 -->
-            <div id="pixelInfo" class="tooltip hidden"></div>
+            <div
+              id="pixelInfo"
+              class="absolute hidden bg-black bg-opacity-80 text-white px-2 py-1 rounded text-xs pointer-events-none z-20"
+            ></div>
           </div>
         </div>
       </main>
+    </div>
 
-      <!-- 상태 표시 -->
-      <div
-        id="statusBar"
-        class="hidden fixed bottom-0 left-0 right-0 bg-gray-800 text-white p-2 text-sm"
-      >
-        <div class="flex justify-between items-center">
-          <div id="statusText">준비</div>
-          <div id="coordinateInfo" class="text-xs text-gray-300"></div>
+    <!-- 에러 모달 -->
+    <div
+      id="errorModal"
+      class="fixed bottom-4 right-4 bg-red-500 text-white p-4 rounded-lg shadow-lg hidden error-modal max-w-sm z-50"
+    >
+      <div class="flex justify-between items-start">
+        <div>
+          <div class="font-bold">오류 발생</div>
+          <div id="errorMessage" class="text-sm mt-1"></div>
         </div>
+        <button id="closeError" class="ml-4 text-white hover:text-gray-200">
+          ✕
+        </button>
       </div>
     </div>
 
-    <!-- 스크립트 로드 -->
-    <script type="module">
-      // 환경 설정
-      window.ENV = {
-        NODE_ENV: "development",
-        API_URL: "",
-        VERSION: "2.0.0",
-      };
+    <!-- 키보드 단축키 도움말 (숨김) -->
+    <div
+      id="helpModal"
+      class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center"
+    >
+      <div class="bg-white p-6 rounded-lg max-w-md mx-4">
+        <h3 class="font-bold text-lg mb-4">키보드 단축키</h3>
+        <div class="space-y-2 text-sm">
+          <div><kbd>1</kbd> - 거리 측정</div>
+          <div><kbd>2</kbd> - 각도 측정</div>
+          <div><kbd>3</kbd> - 면적 측정</div>
+          <div><kbd>R</kbd> - 이미지 초기화</div>
+          <div><kbd>F</kbd> - 화면에 맞춤</div>
+          <div><kbd>P</kbd> - 패닝 모드 토글</div>
+          <div><kbd>+/-</kbd> - 줌 인/아웃</div>
+          <div><kbd>ESC</kbd> - 측정 취소</div>
+        </div>
+        <button
+          id="closeHelp"
+          class="mt-4 bg-blue-500 text-white px-4 py-2 rounded w-full"
+        >
+          닫기
+        </button>
+      </div>
+    </div>
 
-      // 메인 애플리케이션 로드
-      import("./js/app.js").catch((error) => {
-        console.error("애플리케이션 로드 실패:", error);
-        document.body.innerHTML = `
-                <div class="min-h-screen flex items-center justify-center bg-red-50">
-                    <div class="text-center p-8">
-                        <div class="text-6xl mb-4">⚠️</div>
-                        <h1 class="text-2xl font-bold text-red-800 mb-2">애플리케이션 로드 실패</h1>
-                        <p class="text-red-600 mb-4">브라우저가 최신 JavaScript를 지원하지 않습니다.</p>
-                        <button onclick="location.reload()" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600">
-                            다시 시도
-                        </button>
-                    </div>
-                </div>
-            `;
-      });
-    </script>
+    <!-- Scripts -->
+    <script type="module" src="js/app.js"></script>
   </body>
 </html>
