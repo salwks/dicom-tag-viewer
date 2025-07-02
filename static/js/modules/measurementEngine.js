@@ -11,6 +11,9 @@ class MeasurementEngine {
     this.pixelSpacing = null; // [행간격, 열간격] mm/pixel
     this.measurementId = 0;
     this.calibration = null;
+
+    // 순환 참조 방지
+    this._isUpdating = false;
   }
 
   /**
@@ -21,21 +24,19 @@ class MeasurementEngine {
     if (typeof pixelSpacing === "string") {
       try {
         // "0.5\0.5" 형태의 문자열 파싱
-        const values = pixelSpacing
-          .split("\\")
-          .map((v) => parseFloat(v.trim()));
-        if (values.length === 2 && values.every((v) => !isNaN(v))) {
+        const values = pixelSpacing.split("\\").map(v => parseFloat(v.trim()));
+        if (values.length === 2 && values.every(v => !isNaN(v))) {
           this.pixelSpacing = values;
         }
       } catch (error) {
         console.warn("Invalid PixelSpacing format:", pixelSpacing);
       }
     } else if (Array.isArray(pixelSpacing) && pixelSpacing.length === 2) {
-      this.pixelSpacing = pixelSpacing.map((v) => parseFloat(v));
+      this.pixelSpacing = pixelSpacing.map(v => parseFloat(v));
     }
 
-    // 기존 측정값들 재계산
-    if (this.measurements.size > 0) {
+    // 기존 측정값들 재계산 (순환 참조 방지)
+    if (this.measurements.size > 0 && !this._isUpdating) {
       this.recalculateAllMeasurements();
     }
   }
@@ -54,7 +55,7 @@ class MeasurementEngine {
     const measurement = {
       id: ++this.measurementId,
       type: "distance",
-      points: points.map((p) => this.normalizePoint(p)),
+      points: points.map(p => this.normalizePoint(p)),
       createdAt: new Date(),
       options,
       ...this.calculateDistance(points),
@@ -80,7 +81,7 @@ class MeasurementEngine {
     const measurement = {
       id: ++this.measurementId,
       type: "angle",
-      points: points.map((p) => this.normalizePoint(p)),
+      points: points.map(p => this.normalizePoint(p)),
       createdAt: new Date(),
       options,
       ...this.calculateAngle(points),
@@ -106,7 +107,7 @@ class MeasurementEngine {
     const measurement = {
       id: ++this.measurementId,
       type: "area",
-      points: points.map((p) => this.normalizePoint(p)),
+      points: points.map(p => this.normalizePoint(p)),
       createdAt: new Date(),
       options,
       ...this.calculateArea(points),
@@ -294,7 +295,7 @@ class MeasurementEngine {
       throw new Error(`측정 ID ${id}를 찾을 수 없습니다.`);
     }
 
-    measurement.points = newPoints.map((p) => this.normalizePoint(p));
+    measurement.points = newPoints.map(p => this.normalizePoint(p));
     measurement.updatedAt = new Date();
 
     // 측정값 재계산
@@ -358,7 +359,7 @@ class MeasurementEngine {
    * @returns {Array} 해당 타입의 측정 배열
    */
   getMeasurementsByType(type) {
-    return this.getAllMeasurements().filter((m) => m.type === type);
+    return this.getAllMeasurements().filter(m => m.type === type);
   }
 
   /**
@@ -405,11 +406,61 @@ class MeasurementEngine {
   }
 
   /**
-   * 앱 상태 업데이트
+   * 앱 상태 업데이트 (순환 참조 방지)
    */
   updateAppState() {
-    const measurements = this.getAllMeasurements();
-    appState.setState("viewer.measurements", measurements);
+    // 순환 참조 방지
+    if (this._isUpdating) {
+      return;
+    }
+
+    this._isUpdating = true;
+
+    try {
+      const measurements = this.getAllMeasurements();
+      appState.setState("viewer.measurements", measurements);
+    } catch (error) {
+      console.error("측정 상태 업데이트 실패:", error);
+    } finally {
+      this._isUpdating = false;
+    }
+  }
+
+  /**
+   * 모든 측정값 재계산 (순환 참조 방지)
+   */
+  recalculateAllMeasurements() {
+    if (this._isUpdating) {
+      return;
+    }
+
+    this._isUpdating = true;
+
+    try {
+      for (const measurement of this.measurements.values()) {
+        const points = measurement.points;
+
+        switch (measurement.type) {
+          case "distance":
+            Object.assign(measurement, this.calculateDistance(points));
+            break;
+          case "angle":
+            Object.assign(measurement, this.calculateAngle(points));
+            break;
+          case "area":
+            Object.assign(measurement, this.calculateArea(points));
+            break;
+        }
+
+        measurement.updatedAt = new Date();
+      }
+
+      this.updateAppState();
+    } catch (error) {
+      console.error("측정값 재계산 실패:", error);
+    } finally {
+      this._isUpdating = false;
+    }
   }
 
   /**
@@ -421,7 +472,7 @@ class MeasurementEngine {
     let measurements = this.getAllMeasurements();
 
     if (type) {
-      measurements = measurements.filter((m) => m.type === type);
+      measurements = measurements.filter(m => m.type === type);
     }
 
     if (measurements.length === 0) {
@@ -434,7 +485,7 @@ class MeasurementEngine {
       };
     }
 
-    const values = measurements.map((m) => m.value);
+    const values = measurements.map(m => m.value);
     const count = values.length;
     const sum = values.reduce((a, b) => a + b, 0);
     const average = sum / count;
@@ -467,7 +518,7 @@ class MeasurementEngine {
 
     if (format === "csv") {
       const headers = ["ID", "Type", "Value", "Unit", "Created", "Points"];
-      const rows = measurements.map((m) => [
+      const rows = measurements.map(m => [
         m.id,
         m.type,
         m.value.toFixed(3),
@@ -476,54 +527,28 @@ class MeasurementEngine {
         JSON.stringify(m.points),
       ]);
 
-      return [headers, ...rows].map((row) => row.join(",")).join("\n");
+      return [headers, ...rows].map(row => row.join(",")).join("\n");
     } else {
       return JSON.stringify(measurements, null, 2);
     }
   }
 
   /**
-   * 측정 데이터 가져오기
-   * @param {string} data - 가져올 데이터
-   * @param {string} format - 데이터 형식
-   * @returns {Array} 가져온 측정 배열
+   * 캘리브레이션 정보 설정
+   * @param {Object} calibration - 캘리브레이션 정보
    */
-  importMeasurements(data, format = "json") {
-    try {
-      let importedMeasurements = [];
+  setCalibration(calibration) {
+    this.calibration = calibration;
 
-      if (format === "json") {
-        importedMeasurements = JSON.parse(data);
-      } else if (format === "csv") {
-        const lines = data.split("\n");
-        const headers = lines[0].split(",");
-
-        importedMeasurements = lines.slice(1).map((line) => {
-          const values = line.split(",");
-          return {
-            id: parseInt(values[0]),
-            type: values[1],
-            value: parseFloat(values[2]),
-            unit: values[3],
-            createdAt: new Date(values[4]),
-            points: JSON.parse(values[5]),
-          };
-        });
-      }
-
-      // 기존 측정과 ID 충돌 방지
-      importedMeasurements.forEach((measurement) => {
-        const newId = ++this.measurementId;
-        measurement.id = newId;
-        measurement.importedAt = new Date();
-        this.measurements.set(newId, measurement);
-      });
-
-      this.updateAppState();
-      return importedMeasurements;
-    } catch (error) {
-      throw new Error(`측정 데이터 가져오기 실패: ${error.message}`);
+    if (calibration.pixelSpacing) {
+      this.setPixelSpacing(calibration.pixelSpacing);
     }
+
+    this.imageOrientation = calibration.imageOrientation;
+    this.sliceThickness = calibration.sliceThickness;
+
+    // 기존 측정값들 재계산
+    this.recalculateAllMeasurements();
   }
 
   /**
@@ -600,56 +625,13 @@ class MeasurementEngine {
   }
 
   /**
-   * 캘리브레이션 정보 설정
-   * @param {Object} calibration - 캘리브레이션 정보
-   */
-  setCalibration(calibration) {
-    this.calibration = calibration;
-
-    if (calibration.pixelSpacing) {
-      this.setPixelSpacing(calibration.pixelSpacing);
-    }
-
-    this.imageOrientation = calibration.imageOrientation;
-    this.sliceThickness = calibration.sliceThickness;
-
-    // 기존 측정값들 재계산
-    this.recalculateAllMeasurements();
-  }
-
-  /**
-   * 모든 측정값 재계산
-   */
-  recalculateAllMeasurements() {
-    for (const measurement of this.measurements.values()) {
-      const points = measurement.points;
-
-      switch (measurement.type) {
-        case "distance":
-          Object.assign(measurement, this.calculateDistance(points));
-          break;
-        case "angle":
-          Object.assign(measurement, this.calculateAngle(points));
-          break;
-        case "area":
-          Object.assign(measurement, this.calculateArea(points));
-          break;
-      }
-
-      measurement.updatedAt = new Date();
-    }
-
-    this.updateAppState();
-  }
-
-  /**
    * 측정 검색
    * @param {string} query - 검색 쿼리
    * @returns {Array} 검색 결과
    */
   searchMeasurements(query) {
     const lowercaseQuery = query.toLowerCase();
-    return this.getAllMeasurements().filter((measurement) => {
+    return this.getAllMeasurements().filter(measurement => {
       return (
         measurement.type.toLowerCase().includes(lowercaseQuery) ||
         measurement.label.toLowerCase().includes(lowercaseQuery) ||
@@ -716,40 +698,21 @@ class MeasurementEngine {
   }
 
   /**
-   * 측정 그룹화
-   * @param {Array} measurementIds - 그룹화할 측정 ID 배열
-   * @param {string} groupName - 그룹 이름
-   * @returns {Object} 그룹 정보
-   */
-  createMeasurementGroup(measurementIds, groupName) {
-    const group = {
-      id: `group_${Date.now()}`,
-      name: groupName,
-      measurementIds: measurementIds,
-      createdAt: new Date(),
-    };
-
-    // 각 측정에 그룹 정보 추가
-    measurementIds.forEach((id) => {
-      const measurement = this.measurements.get(id);
-      if (measurement) {
-        measurement.groupId = group.id;
-      }
-    });
-
-    this.updateAppState();
-    return group;
-  }
-
-  /**
    * 정리 (메모리 해제)
    */
   cleanup() {
+    this._isUpdating = false;
     this.measurements.clear();
     this.pixelSpacing = null;
     this.calibration = null;
     this.measurementId = 0;
-    this.updateAppState();
+
+    // 상태 업데이트 (순환 참조 없이)
+    try {
+      appState.setState("viewer.measurements", []);
+    } catch (error) {
+      console.warn("측정 정리 중 상태 업데이트 실패:", error);
+    }
   }
 }
 

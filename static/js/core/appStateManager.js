@@ -9,23 +9,42 @@ class AppStateManager {
       // 파일 관련 상태
       uploadedFile: null,
       dicomData: null,
+      previewImageUrl: null,
 
       // UI 상태
-      currentView: "chart", // 'chart', 'table', 'viewer'
+      currentView: "welcome", // 'welcome', 'chart', 'table', 'viewer'
       isLoading: false,
       error: null,
+      isDragOver: false,
+      isOnline: navigator.onLine,
+      browserFeatures: {},
+
+      // 업로드 상태
+      uploadProgress: 0,
 
       // 뷰어 상태
       viewer: {
         mode: "select", // 'select', 'pan'
         isDragging: false,
-        dragTarget: null,
+        imageLoaded: false,
 
         // 이미지 변환 상태
-        scale: 1,
-        brightness: 100,
-        contrast: 100,
-        position: { x: 0, y: 0 },
+        transform: {
+          scale: 1,
+          translateX: 0,
+          translateY: 0,
+          rotation: 0,
+        },
+
+        // 이미지 조정
+        adjustments: {
+          brightness: 0,
+          contrast: 1,
+          gamma: 1,
+          window: null,
+          level: null,
+          invert: false,
+        },
 
         // 측정 상태
         measurements: [],
@@ -33,22 +52,17 @@ class AppStateManager {
         measurementMode: null, // 'distance', 'angle', 'area', null
         currentPoints: [],
 
-        // 주석 상태
-        annotations: {
-          shapes: [],
-          drawings: [],
-          selectedShape: null,
-          selectedDrawing: null,
-          shapeMode: null,
-          drawingMode: null,
-          strokeWidth: 2,
-          strokeColor: "#ff0000",
-        },
+        // 히스토그램
+        histogram: null,
       },
     };
 
     this.subscribers = new Map();
     this.eventListeners = new Map();
+
+    // 순환 호출 방지
+    this._isUpdating = false;
+    this._updateQueue = [];
   }
 
   /**
@@ -68,6 +82,9 @@ class AppStateManager {
       const callbacks = this.subscribers.get(path);
       if (callbacks) {
         callbacks.delete(callback);
+        if (callbacks.size === 0) {
+          this.subscribers.delete(path);
+        }
       }
     };
   }
@@ -78,26 +95,57 @@ class AppStateManager {
    * @param {*} value - 새로운 값
    */
   setState(path, value) {
-    const pathArray = path.split(".");
-    let target = this.state;
-
-    // 경로의 마지막 부분을 제외하고 네비게이션
-    for (let i = 0; i < pathArray.length - 1; i++) {
-      if (!target[pathArray[i]]) {
-        target[pathArray[i]] = {};
-      }
-      target = target[pathArray[i]];
+    // 순환 호출 방지
+    if (this._isUpdating) {
+      this._updateQueue.push({ path, value });
+      return;
     }
 
-    const lastKey = pathArray[pathArray.length - 1];
-    const oldValue = target[lastKey];
-    target[lastKey] = value;
+    this._isUpdating = true;
 
-    // 구독자들에게 알림
-    this.notifySubscribers(path, value, oldValue);
+    try {
+      const pathArray = path.split(".");
+      let target = this.state;
 
-    // 부모 경로의 구독자들에게도 알림
-    this.notifyParentSubscribers(path, value);
+      // 경로의 마지막 부분을 제외하고 네비게이션
+      for (let i = 0; i < pathArray.length - 1; i++) {
+        if (!target[pathArray[i]]) {
+          target[pathArray[i]] = {};
+        }
+        target = target[pathArray[i]];
+      }
+
+      const lastKey = pathArray[pathArray.length - 1];
+      const oldValue = target[lastKey];
+
+      // 값이 실제로 변경된 경우에만 처리
+      if (this.deepEquals(oldValue, value)) {
+        return;
+      }
+
+      target[lastKey] = value;
+
+      // 구독자들에게 알림
+      this.notifySubscribers(path, value, oldValue);
+
+      // 부모 경로의 구독자들에게도 알림
+      this.notifyParentSubscribers(path, value);
+    } finally {
+      this._isUpdating = false;
+
+      // 큐에 있는 업데이트 처리
+      if (this._updateQueue.length > 0) {
+        const updates = [...this._updateQueue];
+        this._updateQueue = [];
+
+        // 다음 tick에서 처리하여 스택 오버플로우 방지
+        setTimeout(() => {
+          updates.forEach(({ path, value }) => {
+            this.setState(path, value);
+          });
+        }, 0);
+      }
+    }
   }
 
   /**
@@ -124,31 +172,74 @@ class AppStateManager {
    * @param {Object} updates - 업데이트할 상태들의 객체
    */
   batchUpdate(updates) {
-    const notifications = [];
-
-    for (const [path, value] of Object.entries(updates)) {
-      const pathArray = path.split(".");
-      let target = this.state;
-
-      for (let i = 0; i < pathArray.length - 1; i++) {
-        if (!target[pathArray[i]]) {
-          target[pathArray[i]] = {};
-        }
-        target = target[pathArray[i]];
-      }
-
-      const lastKey = pathArray[pathArray.length - 1];
-      const oldValue = target[lastKey];
-      target[lastKey] = value;
-
-      notifications.push({ path, value, oldValue });
+    if (this._isUpdating) {
+      Object.entries(updates).forEach(([path, value]) => {
+        this._updateQueue.push({ path, value });
+      });
+      return;
     }
 
-    // 모든 업데이트 완료 후 알림
-    notifications.forEach(({ path, value, oldValue }) => {
-      this.notifySubscribers(path, value, oldValue);
-      this.notifyParentSubscribers(path, value);
-    });
+    const notifications = [];
+    this._isUpdating = true;
+
+    try {
+      for (const [path, value] of Object.entries(updates)) {
+        const pathArray = path.split(".");
+        let target = this.state;
+
+        for (let i = 0; i < pathArray.length - 1; i++) {
+          if (!target[pathArray[i]]) {
+            target[pathArray[i]] = {};
+          }
+          target = target[pathArray[i]];
+        }
+
+        const lastKey = pathArray[pathArray.length - 1];
+        const oldValue = target[lastKey];
+
+        // 값이 실제로 변경된 경우에만 처리
+        if (!this.deepEquals(oldValue, value)) {
+          target[lastKey] = value;
+          notifications.push({ path, value, oldValue });
+        }
+      }
+
+      // 모든 업데이트 완료 후 알림
+      notifications.forEach(({ path, value, oldValue }) => {
+        this.notifySubscribers(path, value, oldValue);
+        this.notifyParentSubscribers(path, value);
+      });
+    } finally {
+      this._isUpdating = false;
+    }
+  }
+
+  /**
+   * 깊은 비교
+   * @param {*} a - 첫 번째 값
+   * @param {*} b - 두 번째 값
+   * @returns {boolean} 같은지 여부
+   */
+  deepEquals(a, b) {
+    if (a === b) return true;
+    if (a == null || b == null) return false;
+    if (typeof a !== typeof b) return false;
+
+    if (typeof a !== "object") return a === b;
+
+    if (Array.isArray(a) !== Array.isArray(b)) return false;
+
+    const keysA = Object.keys(a);
+    const keysB = Object.keys(b);
+
+    if (keysA.length !== keysB.length) return false;
+
+    for (let key of keysA) {
+      if (!keysB.includes(key)) return false;
+      if (!this.deepEquals(a[key], b[key])) return false;
+    }
+
+    return true;
   }
 
   /**
@@ -157,13 +248,16 @@ class AppStateManager {
   notifySubscribers(path, value, oldValue) {
     const callbacks = this.subscribers.get(path);
     if (callbacks) {
-      callbacks.forEach((callback) => {
-        try {
-          callback(value, oldValue, path);
-        } catch (error) {
-          console.error(`Error in state subscriber for ${path}:`, error);
-        }
-      });
+      // 콜백 실행을 다음 tick으로 지연시켜 스택 오버플로우 방지
+      setTimeout(() => {
+        callbacks.forEach(callback => {
+          try {
+            callback(value, oldValue, path);
+          } catch (error) {
+            console.error(`Error in state subscriber for ${path}:`, error);
+          }
+        });
+      }, 0);
     }
   }
 
@@ -180,16 +274,18 @@ class AppStateManager {
 
       if (parentCallbacks) {
         const parentValue = this.getState(parentPath);
-        parentCallbacks.forEach((callback) => {
-          try {
-            callback(parentValue, parentValue, parentPath);
-          } catch (error) {
-            console.error(
-              `Error in parent state subscriber for ${parentPath}:`,
-              error
-            );
-          }
-        });
+        setTimeout(() => {
+          parentCallbacks.forEach(callback => {
+            try {
+              callback(parentValue, parentValue, parentPath);
+            } catch (error) {
+              console.error(
+                `Error in parent state subscriber for ${parentPath}:`,
+                error
+              );
+            }
+          });
+        }, 0);
       }
     }
   }
@@ -210,6 +306,9 @@ class AppStateManager {
       const listeners = this.eventListeners.get(eventName);
       if (listeners) {
         listeners.delete(listener);
+        if (listeners.size === 0) {
+          this.eventListeners.delete(eventName);
+        }
       }
     };
   }
@@ -222,13 +321,16 @@ class AppStateManager {
   emit(eventName, data) {
     const listeners = this.eventListeners.get(eventName);
     if (listeners) {
-      listeners.forEach((listener) => {
-        try {
-          listener(data);
-        } catch (error) {
-          console.error(`Error in event listener for ${eventName}:`, error);
-        }
-      });
+      // 이벤트 처리를 다음 tick으로 지연
+      setTimeout(() => {
+        listeners.forEach(listener => {
+          try {
+            listener(data);
+          } catch (error) {
+            console.error(`Error in event listener for ${eventName}:`, error);
+          }
+        });
+      }, 0);
     }
   }
 
@@ -237,6 +339,17 @@ class AppStateManager {
    * @param {Object} action - 액션 객체
    */
   dispatch(action) {
+    // 디스패치도 다음 tick으로 지연하여 스택 오버플로우 방지
+    setTimeout(() => {
+      this._handleAction(action);
+    }, 0);
+  }
+
+  /**
+   * 액션 처리 (내부)
+   * @param {Object} action - 액션 객체
+   */
+  _handleAction(action) {
     switch (action.type) {
       case "UPLOAD_START":
         this.setState("isLoading", true);
@@ -277,7 +390,7 @@ class AppStateManager {
 
       case "UPDATE_MEASUREMENT":
         const currentMeasurements = this.getState("viewer.measurements") || [];
-        const updatedMeasurements = currentMeasurements.map((m) =>
+        const updatedMeasurements = currentMeasurements.map(m =>
           m.id === action.payload.id ? { ...m, ...action.payload.updates } : m
         );
         this.setState("viewer.measurements", updatedMeasurements);
@@ -286,7 +399,7 @@ class AppStateManager {
       case "DELETE_MEASUREMENT":
         const filteredMeasurements = (
           this.getState("viewer.measurements") || []
-        ).filter((m) => m.id !== action.payload.id);
+        ).filter(m => m.id !== action.payload.id);
         this.setState("viewer.measurements", filteredMeasurements);
         break;
 
@@ -301,10 +414,20 @@ class AppStateManager {
 
       case "RESET_VIEWER":
         this.batchUpdate({
-          "viewer.scale": 1,
-          "viewer.brightness": 100,
-          "viewer.contrast": 100,
-          "viewer.position": { x: 0, y: 0 },
+          "viewer.transform": {
+            scale: 1,
+            translateX: 0,
+            translateY: 0,
+            rotation: 0,
+          },
+          "viewer.adjustments": {
+            brightness: 0,
+            contrast: 1,
+            gamma: 1,
+            window: null,
+            level: null,
+            invert: false,
+          },
           "viewer.measurements": [],
           "viewer.selectedMeasurement": null,
           "viewer.measurementMode": null,
@@ -324,40 +447,45 @@ class AppStateManager {
    * 상태 초기화
    */
   reset() {
-    const initialState = {
+    // 기존 구독자와 리스너는 유지하고 상태만 초기화
+    this.state = {
       uploadedFile: null,
       dicomData: null,
-      currentView: "chart",
+      previewImageUrl: null,
+      currentView: "welcome",
       isLoading: false,
       error: null,
+      isDragOver: false,
+      isOnline: navigator.onLine,
+      browserFeatures: {},
+      uploadProgress: 0,
       viewer: {
         mode: "select",
         isDragging: false,
-        dragTarget: null,
-        scale: 1,
-        brightness: 100,
-        contrast: 100,
-        position: { x: 0, y: 0 },
+        imageLoaded: false,
+        transform: {
+          scale: 1,
+          translateX: 0,
+          translateY: 0,
+          rotation: 0,
+        },
+        adjustments: {
+          brightness: 0,
+          contrast: 1,
+          gamma: 1,
+          window: null,
+          level: null,
+          invert: false,
+        },
         measurements: [],
         selectedMeasurement: null,
         measurementMode: null,
         currentPoints: [],
-        annotations: {
-          shapes: [],
-          drawings: [],
-          selectedShape: null,
-          selectedDrawing: null,
-          shapeMode: null,
-          drawingMode: null,
-          strokeWidth: 2,
-          strokeColor: "#ff0000",
-        },
+        histogram: null,
       },
     };
 
-    this.state = initialState;
-
-    // 모든 구독자에게 리셋 알림
+    // 리셋 이벤트 발생
     this.emit("reset", this.state);
   }
 
@@ -376,10 +504,8 @@ class AppStateManager {
       const saveableState = {
         currentView: this.state.currentView,
         viewer: {
-          scale: this.state.viewer.scale,
-          brightness: this.state.viewer.brightness,
-          contrast: this.state.viewer.contrast,
-          position: this.state.viewer.position,
+          transform: this.state.viewer.transform,
+          adjustments: this.state.viewer.adjustments,
         },
       };
 
@@ -399,29 +525,34 @@ class AppStateManager {
         const savedState = JSON.parse(saved);
 
         // 안전하게 상태 복원
-        if (savedState.currentView) {
-          this.setState("currentView", savedState.currentView);
+        if (savedState.currentView && savedState.currentView !== "welcome") {
+          // 웰컴 화면이 아닌 경우에만 복원 (파일이 없으면 웰컴으로)
+          this.setState("currentView", "welcome");
         }
 
         if (savedState.viewer) {
           const viewer = savedState.viewer;
-          if (typeof viewer.scale === "number") {
-            this.setState("viewer.scale", viewer.scale);
+          if (viewer.transform && typeof viewer.transform === "object") {
+            this.setState("viewer.transform", viewer.transform);
           }
-          if (typeof viewer.brightness === "number") {
-            this.setState("viewer.brightness", viewer.brightness);
-          }
-          if (typeof viewer.contrast === "number") {
-            this.setState("viewer.contrast", viewer.contrast);
-          }
-          if (viewer.position && typeof viewer.position.x === "number") {
-            this.setState("viewer.position", viewer.position);
+          if (viewer.adjustments && typeof viewer.adjustments === "object") {
+            this.setState("viewer.adjustments", viewer.adjustments);
           }
         }
       }
     } catch (error) {
       console.warn("Failed to load state from localStorage:", error);
     }
+  }
+
+  /**
+   * 정리 (메모리 해제)
+   */
+  cleanup() {
+    this.subscribers.clear();
+    this.eventListeners.clear();
+    this._updateQueue = [];
+    this._isUpdating = false;
   }
 }
 

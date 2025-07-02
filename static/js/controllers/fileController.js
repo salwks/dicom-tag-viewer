@@ -5,7 +5,6 @@
 
 import { appState } from "../core/appStateManager.js";
 import { errorHandler } from "../core/errorHandler.js";
-import { fileManager } from "../modules/fileManager.js";
 import { dicomApi } from "../services/apiService.js";
 
 export class FileController {
@@ -13,6 +12,10 @@ export class FileController {
     this.elements = {};
     this.dragCounter = 0;
     this.currentFile = null;
+    this.isProcessing = false;
+
+    // 이벤트 리스너 추적
+    this.eventListeners = new Map();
   }
 
   /**
@@ -46,19 +49,50 @@ export class FileController {
    */
   setupEventListeners() {
     // 파일 입력 변경
-    this.elements.fileInput?.addEventListener("change", (e) => {
-      this.handleFileSelected(e.target.files[0]);
-    });
+    if (this.elements.fileInput) {
+      const fileChangeHandler = e => this.handleFileSelected(e.target.files[0]);
+      this.elements.fileInput.addEventListener("change", fileChangeHandler);
+      this.eventListeners.set("fileInput-change", {
+        element: this.elements.fileInput,
+        event: "change",
+        handler: fileChangeHandler,
+      });
+    }
 
-    // 업로드 요청 이벤트 구독
-    appState.addEventListener("upload-requested", () => {
-      this.handleUploadRequested();
-    });
+    // 파일 선택 버튼들
+    if (this.elements.btnSelectFile) {
+      const selectHandler = () => this.selectFile();
+      this.elements.btnSelectFile.addEventListener("click", selectHandler);
+      this.eventListeners.set("btnSelectFile-click", {
+        element: this.elements.btnSelectFile,
+        event: "click",
+        handler: selectHandler,
+      });
+    }
 
-    // 파일 선택 요청 이벤트 구독
-    appState.addEventListener("file-select-requested", () => {
-      this.selectFile();
-    });
+    if (this.elements.btnSelectFileWelcome) {
+      const selectWelcomeHandler = () => this.selectFile();
+      this.elements.btnSelectFileWelcome.addEventListener(
+        "click",
+        selectWelcomeHandler
+      );
+      this.eventListeners.set("btnSelectFileWelcome-click", {
+        element: this.elements.btnSelectFileWelcome,
+        event: "click",
+        handler: selectWelcomeHandler,
+      });
+    }
+
+    // 업로드 버튼
+    if (this.elements.btnUpload) {
+      const uploadHandler = () => this.handleUploadRequested();
+      this.elements.btnUpload.addEventListener("click", uploadHandler);
+      this.eventListeners.set("btnUpload-click", {
+        element: this.elements.btnUpload,
+        event: "click",
+        handler: uploadHandler,
+      });
+    }
   }
 
   /**
@@ -68,25 +102,25 @@ export class FileController {
     const dropTarget = this.elements.app || document.body;
 
     // 드래그 이벤트 처리
-    dropTarget.addEventListener("dragenter", (e) => {
+    const dragEnterHandler = e => {
       e.preventDefault();
       this.dragCounter++;
       this.showDropZone();
-    });
+    };
 
-    dropTarget.addEventListener("dragleave", (e) => {
+    const dragLeaveHandler = e => {
       e.preventDefault();
       this.dragCounter--;
       if (this.dragCounter === 0) {
         this.hideDropZone();
       }
-    });
+    };
 
-    dropTarget.addEventListener("dragover", (e) => {
+    const dragOverHandler = e => {
       e.preventDefault();
-    });
+    };
 
-    dropTarget.addEventListener("drop", (e) => {
+    const dropHandler = e => {
       e.preventDefault();
       this.dragCounter = 0;
       this.hideDropZone();
@@ -95,6 +129,33 @@ export class FileController {
       if (files.length > 0) {
         this.handleFileSelected(files[0]);
       }
+    };
+
+    dropTarget.addEventListener("dragenter", dragEnterHandler);
+    dropTarget.addEventListener("dragleave", dragLeaveHandler);
+    dropTarget.addEventListener("dragover", dragOverHandler);
+    dropTarget.addEventListener("drop", dropHandler);
+
+    // 이벤트 리스너 추적
+    this.eventListeners.set("dropTarget-dragenter", {
+      element: dropTarget,
+      event: "dragenter",
+      handler: dragEnterHandler,
+    });
+    this.eventListeners.set("dropTarget-dragleave", {
+      element: dropTarget,
+      event: "dragleave",
+      handler: dragLeaveHandler,
+    });
+    this.eventListeners.set("dropTarget-dragover", {
+      element: dropTarget,
+      event: "dragover",
+      handler: dragOverHandler,
+    });
+    this.eventListeners.set("dropTarget-drop", {
+      element: dropTarget,
+      event: "drop",
+      handler: dropHandler,
     });
   }
 
@@ -103,21 +164,30 @@ export class FileController {
    */
   setupStateSubscriptions() {
     // 파일 선택 상태 구독
-    appState.subscribe("uploadedFile", (file) => {
+    const fileSubscription = appState.subscribe("uploadedFile", file => {
       this.currentFile = file;
       this.updateUploadButtonState();
     });
 
     // 업로드 진행률 구독
-    appState.subscribe("uploadProgress", (progress) => {
-      this.updateProgress(progress);
-    });
+    const progressSubscription = appState.subscribe(
+      "uploadProgress",
+      progress => {
+        this.updateProgress(progress);
+      }
+    );
+
+    // 구독 해제 함수 저장
+    this.stateSubscriptions = [fileSubscription, progressSubscription];
   }
 
   /**
    * 파일 선택 트리거
    */
   selectFile() {
+    if (this.isProcessing) {
+      return;
+    }
     this.elements.fileInput?.click();
   }
 
@@ -126,9 +196,11 @@ export class FileController {
    * @param {File} file - 선택된 파일
    */
   async handleFileSelected(file) {
-    if (!file) return;
+    if (!file || this.isProcessing) return;
 
     try {
+      this.isProcessing = true;
+
       // 파일 유효성 검사
       const validation = dicomApi.validateFile(file);
 
@@ -161,6 +233,8 @@ export class FileController {
       await errorHandler.handleError(error, {
         context: "파일 선택 처리",
       });
+    } finally {
+      this.isProcessing = false;
     }
   }
 
@@ -168,20 +242,24 @@ export class FileController {
    * 업로드 요청 처리
    */
   async handleUploadRequested() {
-    if (!this.currentFile) {
-      await errorHandler.handleError({
-        type: "NO_FILE_SELECTED",
-        message: "업로드할 파일을 먼저 선택해주세요.",
-      });
+    if (!this.currentFile || this.isProcessing) {
+      if (!this.currentFile) {
+        await errorHandler.handleError({
+          type: "NO_FILE_SELECTED",
+          message: "업로드할 파일을 먼저 선택해주세요.",
+        });
+      }
       return;
     }
 
     try {
+      this.isProcessing = true;
+
       // 업로드 시작
       appState.dispatch({ type: "UPLOAD_START" });
 
       // 진행률 콜백 설정
-      const onProgress = (progress) => {
+      const onProgress = progress => {
         appState.setState("uploadProgress", progress);
       };
 
@@ -217,6 +295,8 @@ export class FileController {
         context: "파일 업로드",
         retry: true,
       });
+    } finally {
+      this.isProcessing = false;
     }
   }
 
@@ -255,7 +335,7 @@ export class FileController {
    * @returns {Promise<boolean>} 계속 진행 여부
    */
   async showWarningDialog(warnings) {
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
       const modal = document.createElement("div");
       modal.className =
         "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50";
@@ -267,9 +347,7 @@ export class FileController {
           </div>
           <div class="mb-4">
             ${warnings
-              .map(
-                (warning) => `<p class="text-gray-700 mb-2">• ${warning}</p>`
-              )
+              .map(warning => `<p class="text-gray-700 mb-2">• ${warning}</p>`)
               .join("")}
           </div>
           <div class="text-sm text-gray-600 mb-4">
@@ -299,7 +377,7 @@ export class FileController {
       });
 
       // ESC 키로 닫기
-      const handleEsc = (e) => {
+      const handleEsc = e => {
         if (e.key === "Escape") {
           modal.remove();
           document.removeEventListener("keydown", handleEsc);
@@ -332,9 +410,10 @@ export class FileController {
     const isLoading = appState.getState("isLoading");
 
     if (this.elements.btnUpload) {
-      this.elements.btnUpload.disabled = !hasFile || isLoading;
+      this.elements.btnUpload.disabled =
+        !hasFile || isLoading || this.isProcessing;
 
-      if (hasFile && !isLoading) {
+      if (hasFile && !isLoading && !this.isProcessing) {
         this.elements.btnUpload.classList.remove(
           "opacity-50",
           "cursor-not-allowed"
@@ -448,25 +527,43 @@ export class FileController {
    * @returns {boolean} 허용 여부
    */
   canSelectNewFile() {
-    const isLoading = appState.getState("isLoading");
-    return !isLoading;
+    return !this.isProcessing;
   }
 
   /**
    * 파일 재업로드
    */
   async retryUpload() {
-    if (this.currentFile) {
+    if (this.currentFile && !this.isProcessing) {
       await this.handleUploadRequested();
     }
   }
 
   /**
-   * 정리
+   * 정리 (메모리 해제)
    */
   cleanup() {
     // 드래그 카운터 초기화
     this.dragCounter = 0;
+    this.isProcessing = false;
+
+    // 이벤트 리스너 제거
+    this.eventListeners.forEach(({ element, event, handler }) => {
+      if (element && handler) {
+        element.removeEventListener(event, handler);
+      }
+    });
+    this.eventListeners.clear();
+
+    // 상태 구독 해제
+    if (this.stateSubscriptions) {
+      this.stateSubscriptions.forEach(unsubscribe => {
+        if (typeof unsubscribe === "function") {
+          unsubscribe();
+        }
+      });
+      this.stateSubscriptions = null;
+    }
 
     // 미리보기 URL 정리
     const imageUrl = appState.getState("previewImageUrl");

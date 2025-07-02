@@ -1,5 +1,5 @@
 /**
- * 이미지 처리 엔진 (수정됨)
+ * 이미지 처리 엔진
  * DICOM 이미지의 표시, 조작, 변환을 담당
  */
 
@@ -13,7 +13,7 @@ class ImageProcessor {
     this.imageData = null;
     this.originalImageData = null;
 
-    // 변환 매트릭스 - ViewerController와 분리
+    // 변환 매트릭스
     this.transform = {
       scale: 1,
       translateX: 0,
@@ -33,24 +33,25 @@ class ImageProcessor {
 
     // 히스토그램 데이터
     this.histogram = null;
+
+    // 순환 참조 방지
+    this._isUpdating = false;
   }
 
   /**
-   * 캔버스 초기화 (단순화)
+   * 캔버스 초기화
    * @param {HTMLCanvasElement} canvas - 캔버스 요소
    */
   initializeCanvas(canvas) {
     this.canvas = canvas;
-    this.context = canvas?.getContext("2d");
+    this.context = canvas.getContext("2d");
 
-    if (this.context) {
-      // 이미지 스무딩 비활성화 (의료영상의 정확성을 위해)
-      this.context.imageSmoothingEnabled = false;
-    }
+    // 이미지 스무딩 비활성화 (의료영상의 정확성을 위해)
+    this.context.imageSmoothingEnabled = false;
   }
 
   /**
-   * 이미지 로드 (간소화)
+   * 이미지 로드
    * @param {string|ImageData} source - 이미지 소스 (URL 또는 ImageData)
    * @returns {Promise} 로드 완료 Promise
    */
@@ -66,14 +67,16 @@ class ImageProcessor {
 
         await new Promise((resolve, reject) => {
           img.onload = () => {
-            // 임시 캔버스에서 ImageData 추출
-            const tempCanvas = document.createElement('canvas');
-            const tempCtx = tempCanvas.getContext('2d');
-            tempCanvas.width = img.width;
-            tempCanvas.height = img.height;
-            tempCtx.drawImage(img, 0, 0);
+            this.canvas.width = img.width;
+            this.canvas.height = img.height;
+            this.context.drawImage(img, 0, 0);
 
-            this.imageData = tempCtx.getImageData(0, 0, img.width, img.height);
+            this.imageData = this.context.getImageData(
+              0,
+              0,
+              img.width,
+              img.height
+            );
             this.originalImageData = this.cloneImageData(this.imageData);
             resolve();
           };
@@ -102,13 +105,43 @@ class ImageProcessor {
   }
 
   /**
-   * 이미지 변환 적용 (ViewerController에서 직접 처리하므로 단순화)
+   * 이미지 변환 적용
    * @param {Object} newTransform - 새로운 변환 값
    */
   applyTransform(newTransform) {
-    // 이 메서드는 호환성을 위해 유지하지만 실제로는 ViewerController에서 처리
-    Object.assign(this.transform, newTransform);
-    appState.setState("viewer.transform", { ...this.transform });
+    // 순환 참조 방지
+    if (this._isUpdating) return;
+
+    this._isUpdating = true;
+
+    try {
+      // 기본값으로 초기화
+      if (!this.transform) {
+        this.transform = {
+          scale: 1,
+          translateX: 0,
+          translateY: 0,
+          rotation: 0,
+        };
+      }
+
+      // 안전한 값으로 업데이트
+      Object.keys(newTransform).forEach(key => {
+        const value = newTransform[key];
+        if (!isNaN(value) && isFinite(value)) {
+          this.transform[key] = value;
+        }
+      });
+
+      this.render();
+
+      // 상태 업데이트를 다음 tick으로 지연
+      setTimeout(() => {
+        appState.setState("viewer.transform", { ...this.transform });
+      }, 0);
+    } finally {
+      this._isUpdating = false;
+    }
   }
 
   /**
@@ -118,6 +151,7 @@ class ImageProcessor {
   applyAdjustments(newAdjustments) {
     Object.assign(this.adjustments, newAdjustments);
     this.processImage();
+    this.render();
 
     appState.setState("viewer.adjustments", { ...this.adjustments });
   }
@@ -200,10 +234,28 @@ class ImageProcessor {
   }
 
   /**
-   * 이미지 렌더링 (ViewerController에서 직접 처리하므로 제거)
+   * 이미지 렌더링
    */
   render() {
-    // ViewerController에서 직접 처리하므로 빈 메서드로 유지
+    if (!this.imageData || !this.context) return;
+
+    // 캔버스 클리어
+    this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+    // 변환 매트릭스 적용
+    this.context.save();
+    this.context.translate(this.canvas.width / 2, this.canvas.height / 2);
+    this.context.scale(this.transform.scale, this.transform.scale);
+    this.context.rotate((this.transform.rotation * Math.PI) / 180);
+    this.context.translate(
+      this.transform.translateX - this.imageData.width / 2,
+      this.transform.translateY - this.imageData.height / 2
+    );
+
+    // 이미지 그리기
+    this.context.putImageData(this.imageData, 0, 0);
+
+    this.context.restore();
   }
 
   /**
@@ -293,6 +345,60 @@ class ImageProcessor {
   }
 
   /**
+   * 좌표 변환 (캔버스 좌표 -> 이미지 좌표)
+   * @param {number} canvasX - 캔버스 X 좌표
+   * @param {number} canvasY - 캔버스 Y 좌표
+   * @returns {Object} 이미지 좌표
+   */
+  canvasToImageCoordinates(canvasX, canvasY) {
+    const rect = this.canvas.getBoundingClientRect();
+    const x = canvasX - rect.left;
+    const y = canvasY - rect.top;
+
+    // 변환 역산
+    const centerX = this.canvas.width / 2;
+    const centerY = this.canvas.height / 2;
+
+    const adjustedX =
+      (x - centerX) / this.transform.scale -
+      this.transform.translateX +
+      this.imageData.width / 2;
+    const adjustedY =
+      (y - centerY) / this.transform.scale -
+      this.transform.translateY +
+      this.imageData.height / 2;
+
+    return {
+      x: Math.round(adjustedX),
+      y: Math.round(adjustedY),
+      relativeX: adjustedX / this.imageData.width,
+      relativeY: adjustedY / this.imageData.height,
+    };
+  }
+
+  /**
+   * 좌표 변환 (이미지 좌표 -> 캔버스 좌표)
+   * @param {number} imageX - 이미지 X 좌표
+   * @param {number} imageY - 이미지 Y 좌표
+   * @returns {Object} 캔버스 좌표
+   */
+  imageToCanvasCoordinates(imageX, imageY) {
+    const centerX = this.canvas.width / 2;
+    const centerY = this.canvas.height / 2;
+
+    const x =
+      (imageX - this.imageData.width / 2 + this.transform.translateX) *
+        this.transform.scale +
+      centerX;
+    const y =
+      (imageY - this.imageData.height / 2 + this.transform.translateY) *
+        this.transform.scale +
+      centerY;
+
+    return { x, y };
+  }
+
+  /**
    * 픽셀 값 읽기
    * @param {number} x - X 좌표
    * @param {number} y - Y 좌표
@@ -359,6 +465,7 @@ class ImageProcessor {
 
     if (this.originalImageData) {
       this.imageData = this.cloneImageData(this.originalImageData);
+      this.render();
     }
 
     appState.setState("viewer.transform", { ...this.transform });
@@ -408,6 +515,7 @@ class ImageProcessor {
    * 정리
    */
   cleanup() {
+    this._isUpdating = false;
     this.canvas = null;
     this.context = null;
     this.imageData = null;

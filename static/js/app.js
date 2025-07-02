@@ -1,22 +1,21 @@
 /**
- * 메인 애플리케이션 컨트롤러 (모듈형 뷰어 적용)
+ * 메인 애플리케이션 컨트롤러
  * 전체 애플리케이션의 초기화와 라우팅을 담당
  */
 
-// 핵심 모듈 import
+// 핵심 모듈 import - 경로 수정
 import { appState } from "./core/appStateManager.js";
 import { errorHandler } from "./core/errorHandler.js";
 import { fileManager } from "./modules/fileManager.js";
 import { measurementEngine } from "./modules/measurementEngine.js";
+import { imageProcessor } from "./modules/imageProcessor.js";
 
 // 컨트롤러 import
 import { UIController } from "./controllers/uiController.js";
 import { FileController } from "./controllers/fileController.js";
+import { ViewerController } from "./controllers/viewerController.js";
 import { ChartController } from "./controllers/chartController.js";
 import { TableController } from "./controllers/tableController.js";
-
-// 새로운 모듈형 뷰어 컨트롤러 import
-import ModularViewerController from "./controllers/viewer/ModularViewerController.js";
 
 class DicomAnalyzerApp {
   constructor() {
@@ -24,6 +23,10 @@ class DicomAnalyzerApp {
     this.isInitialized = false;
     this.currentView = null;
     this.resizeTimeout = null;
+
+    // 순환 참조 방지
+    this._isViewChanging = false;
+    this._pendingViewChange = null;
   }
 
   /**
@@ -90,8 +93,8 @@ class DicomAnalyzerApp {
     this.controllers.table = new TableController();
     await this.controllers.table.initialize();
 
-    // 새로운 모듈형 뷰어 컨트롤러 (기존 ViewerController 대체)
-    this.controllers.viewer = new ModularViewerController();
+    // 뷰어 컨트롤러 (가장 복잡하므로 마지막에)
+    this.controllers.viewer = new ViewerController();
     await this.controllers.viewer.initialize();
 
     console.log("모든 컨트롤러 초기화 완료");
@@ -138,9 +141,11 @@ class DicomAnalyzerApp {
    * 상태 구독 설정
    */
   setupStateSubscriptions() {
-    // 현재 뷰 변경 감지
+    // 현재 뷰 변경 감지 (순환 참조 방지)
     appState.subscribe("currentView", view => {
-      this.handleViewChange(view);
+      if (!this._isViewChanging) {
+        this.handleViewChange(view);
+      }
     });
 
     // 로딩 상태 변경 감지
@@ -158,20 +163,30 @@ class DicomAnalyzerApp {
     // 파일 업로드 상태 변경 감지
     appState.subscribe("uploadedFile", file => {
       if (file) {
-        this.handleFileUploaded(file);
+        // 다음 tick에서 처리하여 스택 오버플로우 방지
+        setTimeout(() => {
+          this.handleFileUploaded(file);
+        }, 0);
       }
     });
 
     // DICOM 데이터 변경 감지
     appState.subscribe("dicomData", data => {
       if (data) {
-        this.handleDicomDataLoaded(data);
+        // 다음 tick에서 처리하여 스택 오버플로우 방지
+        setTimeout(() => {
+          this.handleDicomDataLoaded(data);
+        }, 0);
       }
     });
 
     // 뷰어 상태 변경 시 로컬 스토리지 저장
     appState.subscribe("viewer", () => {
-      appState.saveToLocalStorage();
+      // 디바운스 처리
+      clearTimeout(this.saveTimeout);
+      this.saveTimeout = setTimeout(() => {
+        appState.saveToLocalStorage();
+      }, 1000);
     });
   }
 
@@ -202,9 +217,8 @@ class DicomAnalyzerApp {
       });
     }
 
-    // 초기 뷰 설정
-    const savedView = appState.getState("currentView") || "welcome";
-    this.setView(savedView);
+    // 초기 뷰 설정 (항상 welcome으로 시작)
+    this.setView("welcome");
   }
 
   /**
@@ -272,63 +286,64 @@ class DicomAnalyzerApp {
    * @param {KeyboardEvent} e - 키보드 이벤트
    */
   handleViewerShortcuts(e) {
-    // 모듈형 뷰어에서는 각 모듈이 키보드 이벤트를 직접 처리하므로
-    // 여기서는 추가적인 전역 단축키만 처리
     switch (e.key) {
-      case "h":
-      case "H":
-        // 도움말 표시
-        this.showShortcutHelp();
-        e.preventDefault();
+      case "1":
+        this.controllers.viewer.setMeasurementMode("distance");
         break;
-      case "d":
-      case "D":
-        // 진단 정보 표시 (개발 모드)
-        if (window.ENV?.NODE_ENV === "development") {
-          console.log(
-            "뷰어 진단 정보:",
-            this.controllers.viewer.getDiagnostics()
-          );
-        }
+      case "2":
+        this.controllers.viewer.setMeasurementMode("angle");
+        break;
+      case "3":
+        this.controllers.viewer.setMeasurementMode("area");
+        break;
+      case "r":
+        this.controllers.viewer.resetImage();
+        break;
+      case "f":
+        this.controllers.viewer.fitToWindow();
+        break;
+      case "+":
+      case "=":
         e.preventDefault();
+        this.controllers.viewer.zoomIn();
+        break;
+      case "-":
+        e.preventDefault();
+        this.controllers.viewer.zoomOut();
         break;
     }
   }
 
   /**
-   * 단축키 도움말 표시
-   */
-  showShortcutHelp() {
-    const controlsModule = this.controllers.viewer.getModule("controls");
-    if (
-      controlsModule &&
-      typeof controlsModule.showShortcutHelp === "function"
-    ) {
-      controlsModule.showShortcutHelp();
-    }
-  }
-
-  /**
-   * 뷰 변경 처리
+   * 뷰 변경 처리 (순환 참조 방지)
    * @param {string} view - 새로운 뷰
    */
   async handleViewChange(view) {
-    if (this.currentView === view) return;
+    if (this.currentView === view || this._isViewChanging) {
+      return;
+    }
+
+    // 대기 중인 뷰 변경이 있으면 저장
+    if (this._isViewChanging) {
+      this._pendingViewChange = view;
+      return;
+    }
+
+    this._isViewChanging = true;
 
     try {
-      // 이전 뷰 정리 (순환 참조 방지)
-      const previousView = this.currentView;
-      this.currentView = view; // 먼저 현재 뷰 설정
-
+      // 이전 뷰 정리
       if (
-        previousView &&
-        previousView !== "welcome" &&
-        this.controllers[previousView]
+        this.currentView &&
+        this.currentView !== "welcome" &&
+        this.controllers[this.currentView]
       ) {
-        await this.controllers[previousView].deactivate();
+        await this.controllers[this.currentView].deactivate();
       }
 
       // 새 뷰 활성화
+      this.currentView = view;
+
       if (view === "welcome") {
         this.controllers.ui.showWelcomeScreen();
       } else if (this.controllers[view]) {
@@ -342,6 +357,17 @@ class DicomAnalyzerApp {
       await errorHandler.handleError(error, {
         context: `뷰 변경 (${view})`,
       });
+    } finally {
+      this._isViewChanging = false;
+
+      // 대기 중인 뷰 변경 처리
+      if (this._pendingViewChange) {
+        const pendingView = this._pendingViewChange;
+        this._pendingViewChange = null;
+        setTimeout(() => {
+          this.setView(pendingView);
+        }, 0);
+      }
     }
   }
 
@@ -357,7 +383,7 @@ class DicomAnalyzerApp {
       // 뷰 버튼 활성화
       this.controllers.ui.enableViewButtons();
 
-      // 자동으로 차트 뷰로 전환
+      // 자동으로 차트 뷰로 전환 (순환 참조 방지)
       await this.setView("chart");
     } catch (error) {
       await errorHandler.handleError(error, {
@@ -377,12 +403,10 @@ class DicomAnalyzerApp {
         measurementEngine.setPixelSpacing(data.image_info.pixel_spacing);
       }
 
-      // 각 컨트롤러에 데이터 전달
-      await Promise.all([
-        this.controllers.chart.loadData(data),
-        this.controllers.table.loadData(data),
-        this.controllers.viewer.loadData(data),
-      ]);
+      // 각 컨트롤러에 데이터 전달 (병렬 처리 대신 순차 처리로 안정성 확보)
+      await this.controllers.chart.loadData(data);
+      await this.controllers.table.loadData(data);
+      await this.controllers.viewer.loadData(data);
 
       console.log("DICOM 데이터 로드 완료");
     } catch (error) {
@@ -415,7 +439,7 @@ class DicomAnalyzerApp {
       appState.setState("isLoading", false);
     }
 
-    // 뷰어에서 측정 모드 해제
+    // 측정 모드 해제
     if (this.currentView === "viewer") {
       this.controllers.viewer.cancelMeasurement();
     }
@@ -443,11 +467,19 @@ class DicomAnalyzerApp {
   }
 
   /**
-   * 뷰 설정
+   * 뷰 설정 (순환 참조 방지)
    * @param {string} view - 설정할 뷰
    */
   async setView(view) {
-    appState.setState("currentView", view);
+    // 이미 같은 뷰이거나 변경 중이면 무시
+    if (this.currentView === view || this._isViewChanging) {
+      return;
+    }
+
+    // 상태 업데이트는 다음 tick에서 처리
+    setTimeout(() => {
+      appState.setState("currentView", view);
+    }, 0);
   }
 
   /**
@@ -460,35 +492,9 @@ class DicomAnalyzerApp {
       controllers: Object.keys(this.controllers),
       measurements: measurementEngine.getAllMeasurements(),
       isInitialized: this.isInitialized,
-      viewerDiagnostics: this.controllers.viewer?.getDiagnostics() || null,
+      isViewChanging: this._isViewChanging,
+      pendingViewChange: this._pendingViewChange,
     };
-  }
-
-  /**
-   * 에러 복구 시도
-   */
-  async recoverFromError() {
-    try {
-      console.log("애플리케이션 에러 복구 시도");
-
-      // 뷰어 복구 시도
-      if (this.controllers.viewer) {
-        const recovered = await this.controllers.viewer.recoverFromError();
-        if (!recovered) {
-          console.warn("뷰어 복구 실패");
-        }
-      }
-
-      // 상태 초기화
-      appState.setState("error", null);
-      appState.setState("isLoading", false);
-
-      console.log("애플리케이션 에러 복구 완료");
-      return true;
-    } catch (error) {
-      console.error("애플리케이션 에러 복구 실패:", error);
-      return false;
-    }
   }
 
   /**
@@ -497,18 +503,26 @@ class DicomAnalyzerApp {
   cleanup() {
     console.log("애플리케이션 정리 중...");
 
+    // 뷰 변경 상태 초기화
+    this._isViewChanging = false;
+    this._pendingViewChange = null;
+
     // 컨트롤러 정리
     Object.values(this.controllers).forEach(controller => {
       controller.cleanup?.();
     });
 
     // 모듈 정리
-    fileManager.cleanup();
+    fileManager.cleanup?.();
     measurementEngine.cleanup();
+    imageProcessor.cleanup?.();
 
     // 타이머 정리
     if (this.resizeTimeout) {
       clearTimeout(this.resizeTimeout);
+    }
+    if (this.saveTimeout) {
+      clearTimeout(this.saveTimeout);
     }
 
     // 상태 저장
@@ -551,10 +565,6 @@ if (window.ENV?.NODE_ENV === "development") {
       appState.reset();
       location.reload();
     },
-    recoverFromError: () => app.recoverFromError(),
-    getViewerDiagnostics: () => app.controllers.viewer?.getDiagnostics(),
-    getPerformanceMetrics: () =>
-      app.controllers.viewer?.getPerformanceMetrics(),
   };
 
   console.log("🔧 개발 모드: window.app, window.debug 사용 가능");
